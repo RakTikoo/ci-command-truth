@@ -1,0 +1,22 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "echo hi" > gen.sh
+      - run: bash gen.sh
+      - run: |
+          curl -fsSL -o dl.sh https://example.com/dl.sh
+          bash dl.sh
+      - run: git clone https://example.com/repo.git vendor/repo
+      - run: bash vendor/repo/setup.sh
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          path: other
+      - run: bash other/tool.sh
+      - run: ./node_modules/.bin/eslint .
+      - run: touch made.txt && bash made.txt
+      - run: cp scripts/real.sh copied.sh && bash copied.sh
+      - run: npm run test
