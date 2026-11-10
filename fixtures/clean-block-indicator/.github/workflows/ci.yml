@@ -1,0 +1,13 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |2
+          npm run test
+      - run: >2-
+          npm run
+          build
+      - run: |- # literal, keep newlines
+          npm run test
