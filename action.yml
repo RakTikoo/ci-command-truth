@@ -1,0 +1,25 @@
+name: CI Command Truth
+description: Prove every run: command in .github/workflows exists (npm/pnpm/yarn scripts, make targets, just recipes, script files, python -m modules, pip -r files).
+author: RakTikoo
+branding:
+  icon: check-circle
+  color: green
+inputs:
+  path:
+    description: Repository root to scan
+    required: false
+    default: "."
+  github-annotations:
+    description: Emit ::error/::warning annotation lines
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        args=()
+        if [ "${{ inputs.github-annotations }}" = "true" ]; then
+          args+=(--github-annotations)
+        fi
+        python3 "${{ github.action_path }}/ci_command_truth.py" "${{ inputs.path }}" "${args[@]}"
