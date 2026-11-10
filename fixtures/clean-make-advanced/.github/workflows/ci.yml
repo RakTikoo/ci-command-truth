@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make test
+      - run: make extra
+      - run: make foo.o
+      - run: make -f alt.mk alttarget
+      - run: make data.txt
+      - run: make -C sub subextra
