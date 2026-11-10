@@ -1,0 +1,14 @@
+name: test
+on: push
+jobs:
+  off:
+    runs-on: ubuntu-latest
+    if: ${{ false }}
+    steps:
+      - run: npm run nope-job
+  on:
+    runs-on: ubuntu-latest
+    steps:
+      - if: false
+        run: npm run nope-step
+      - run: npm run test
