@@ -1,0 +1,13 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: just test
+      - run: just build
+      - run: just quiet
+      - run: just t
+      - run: just imported
+      - run: just frommod
+      - run: just -f custom.justfile customrecipe
