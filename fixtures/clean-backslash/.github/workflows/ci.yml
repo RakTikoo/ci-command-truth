@@ -1,0 +1,9 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: .\scripts\run.sh
+      - run: python tools\check.py
+      - run: .\scripts\run.sh && python tools\check.py
