@@ -1,0 +1,2 @@
+subonly:
+	echo sub
