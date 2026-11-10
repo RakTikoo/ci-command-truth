@@ -1,0 +1,13 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pnpm run test
+      - run: pnpm build
+      - run: yarn test
+      - run: yarn run build
+      - run: bun run test
+      - run: pnpm install
+      - run: yarn install
