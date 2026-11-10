@@ -1,0 +1,2 @@
+alttarget:
+	echo alt
