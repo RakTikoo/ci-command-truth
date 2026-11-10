@@ -1,0 +1,17 @@
+# Copy into .github/workflows/ci-command-truth.yml in your repository.
+name: ci-command-truth
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  command-truth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Option A: run the script directly (vendored in this repo).
+      - name: Prove every run command exists
+        run: python3 ci_command_truth.py . --github-annotations
+      # Option B (once published): uses: RakTikoo/ci-command-truth@v1
