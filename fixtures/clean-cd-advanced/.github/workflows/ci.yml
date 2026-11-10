@@ -1,0 +1,18 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          (cd sub && make subonly)
+          make rootonly
+      - run: |
+          cd -- sub && make subonly
+          cd -
+          make rootonly
+      - run: |
+          cd sub
+          make subonly
+          cd ..
+          make rootonly
