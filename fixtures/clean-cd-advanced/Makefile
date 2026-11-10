@@ -1,0 +1,2 @@
+rootonly:
+	echo root
