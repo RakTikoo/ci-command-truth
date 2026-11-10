@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cat <<'EOF'
+          npm run not-a-real-script
+          ./missing.sh
+          EOF
+          npm run test
