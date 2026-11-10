@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -u -m pkg.mod
+      - run: python -W ignore -m pkg.mod
+      - run: python -W ignore tools/check.py
+      - run: python3 -X dev tools/check.py
+      - run: bash -e scripts/run.sh
+      - run: bash -x -e ./scripts/run.sh
