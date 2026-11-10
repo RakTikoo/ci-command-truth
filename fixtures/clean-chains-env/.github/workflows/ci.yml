@@ -1,0 +1,10 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello && ls -la | grep foo; FOO=bar npm run test
+      - run: sudo apt-get update && docker build . && git status
+      - run: curl https://example.com | tar xz
+      - run: cd sub && make test
