@@ -1,0 +1,9 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm run ${{ matrix.script }}
+      - run: echo $HOME && npm run $MY_SCRIPT
+      - run: ./scripts/${{ inputs.file }}
