@@ -1,0 +1,16 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            console.log("hi")
+            run: npm run inside-script-nope
+          run: npm run with-run-nope
+        env:
+          run: npm run env-run-nope
+      - name: real
+        run: npm run test
