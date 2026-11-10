@@ -1,0 +1,2 @@
+customrecipe:
+    echo custom

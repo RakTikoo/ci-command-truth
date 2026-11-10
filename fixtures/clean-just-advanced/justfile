@@ -1,0 +1,14 @@
+alias t := test
+
+import 'extra.just'
+
+mod foo
+
+test:
+    echo ok
+
+build target='release':
+    echo build
+
+@quiet:
+    echo shh
