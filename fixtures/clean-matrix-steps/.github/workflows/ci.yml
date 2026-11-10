@@ -1,0 +1,15 @@
+name: test
+on: push
+steps:
+  - run: npm run top-level-nope
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - node: 18
+            run: npm run matrix-nope
+          - node: 20
+    steps:
+      - run: npm run test
