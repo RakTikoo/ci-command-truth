@@ -1,0 +1,14 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: pwsh
+        run: npm run nope-pwsh
+      - shell: python
+        run: npm run nope-python
+      - shell: cmd
+        run: npm run nope-cmd
+      - shell: bash
+        run: npm run test
