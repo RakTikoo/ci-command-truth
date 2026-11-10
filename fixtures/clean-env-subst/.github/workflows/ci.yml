@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: env -u FOO npm run test
+      - run: env -C . npm run build
+      - run: echo $(npm run inside-subst-nope) && npm run test
+      - run: echo `npm run backtick-nope` ; npm run build
+      - run: diff <(echo a) <(echo b) && npm run test
+      - run: npm run test $(echo extra)
