@@ -1,0 +1,10 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - working-directory: app
+        run: npm run test
+      - working-directory: app
+        run: make test
