@@ -1,0 +1,10 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m http.server 8000
+      - run: python3 -m unittest discover
+      - run: python -m build
+      - run: python -m pkg.mod
