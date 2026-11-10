@@ -1,0 +1,8 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm run test # run the tests
+      - run: echo "a # b" && npm run build ; echo done # trailing
