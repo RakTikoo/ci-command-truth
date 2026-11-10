@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./scripts/run.sh
+      - run: bash scripts/run.sh
+      - run: python3 tools/check.py
+      - run: node tools/build.js
+      - run: python -m pkg.mod
+      - run: pip install -r requirements.txt
