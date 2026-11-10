@@ -1,0 +1,9 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install requests
+      - run: python -m someinstalledpkg
+      - run: python -m pkg.mod
