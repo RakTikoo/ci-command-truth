@@ -1,0 +1,21 @@
+name: test
+on: push
+defaults:
+  run:
+    working-directory: app
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm run test
+  b:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - run: npm run root-test
+  c:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm run test
