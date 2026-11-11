@@ -545,3 +545,35 @@ Re-run with the final post-review build: identical results.
   (which cannot execute an extension module), but the wording does
   not distinguish "exists as compiled module" (FP hunter LOW,
   accepted).
+
+## Cargo fixture pack (2026-11-11) — corpus first, no resolver yet
+
+Three fixture repos were added under `fixtures/` for the cargo rung
+of the expansion ladder, with **no tool code changes**:
+
+- `clean-cargo-single` — one crate; the workflow runs `cargo test`,
+  `cargo build`, and `cargo run --bin singlecrate` (the binary
+  exists). Expected with a resolver: 0 findings, exit 0.
+- `clean-cargo-workspace` — a two-member workspace; the workflow
+  runs `cargo test -p alpha`, `cargo test -p beta`, and
+  `cargo build --workspace`. Expected with a resolver: 0 findings,
+  exit 0.
+- `missing-cargo-bin` — the workflow runs
+  `cargo run --bin ghostbin`, but the crate's only binary is
+  `realbin`. Expected with a resolver: exactly 1 finding, exit 1.
+  This is the future resolver's acceptance test.
+
+Each fixture documents its expectation in an `EXPECTED.md` file.
+Verified today: all three parse (TOML/YAML) and the tool reports
+0 findings / exit 0 on each, with every cargo segment skipped as
+`external-tool` and `checked` = 0 — exactly what the EXPECTED.md
+files record.
+
+The fixtures are deliberately **not** registered in `run_tests.py`:
+the clean-corpus test asserts `checked > 0` per fixture and the
+missing-corpus test asserts exactly one finding, neither of which
+can hold before a cargo resolver exists. Registration belongs to
+the same change that lands the resolver. The registered corpus is
+unchanged (31 clean / 7 planted-missing / 8 edge / 1 special);
+`run_tests.py` (70 tests) and `spotcheck_fp.py` (14/14) pass with
+the pack in place.

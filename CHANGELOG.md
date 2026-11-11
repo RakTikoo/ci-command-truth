@@ -4,6 +4,12 @@ Brief, factual entries for the shipped versions, newest first.
 
 ## Unreleased
 
+- Fixtures: added a cargo fixture pack (`clean-cargo-single`,
+  `clean-cargo-workspace`, `missing-cargo-bin`) with documented
+  expectations in each fixture's `EXPECTED.md`, ahead of any cargo
+  resolver — corpus first, no tool code changes. The fixtures are
+  not yet registered in `run_tests.py`; registration lands with
+  the resolver.
 - Documentation: corrected stale status lines in `ANALYSIS.md`
   (cross-repo staleness audit, 2026-11-11); added this changelog, a
   `CONTRIBUTING.md`, and the README demo above.

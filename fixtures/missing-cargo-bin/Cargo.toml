@@ -1,0 +1,8 @@
+[package]
+name = "realcrate"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "realbin"
+path = "src/main.rs"

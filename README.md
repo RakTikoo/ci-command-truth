@@ -184,7 +184,11 @@ Fixture corpus in `fixtures/`: 31 clean repos that must produce zero
 findings, 7 repos with exactly one planted missing reference each, 8
 edge-case repos (no-run, uses-only, empty, malformed, CRLF, nested
 workflow subdirectory, empty workflows dir, malformed package.json),
-and 1 downgrade repo (warning-severity findings, exit 0). See
+and 1 downgrade repo (warning-severity findings, exit 0). A further
+3 cargo repos (2 clean, 1 planted-missing) sit alongside them with
+documented expectations in their `EXPECTED.md` files; they join the
+registered corpus when a cargo resolver lands, since cargo segments
+are currently skipped as external tools. See
 ANALYSIS.md for the score, including the v0.2 section.
 
 ## License
