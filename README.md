@@ -9,6 +9,35 @@ target, or `./scripts/release.sh` when that file was renamed fails only
 checks those references statically, in milliseconds, with zero
 dependencies.
 
+## Demo
+
+A two-file demo repo: `package.json` defines the scripts `test` and
+`test:units` — but the workflow asks for `test:unit` (no trailing "s"):
+
+```yaml
+# .github/workflows/ci.yml — the last step
+      - run: npm run test:unit
+```
+
+```console
+$ python3 ci_command_truth.py .
+CI Command Truth — root: .
+Workflows scanned: 1
+  scanned: .github/workflows/ci.yml
+Segments checked: 1
+Segments skipped: 0
+Findings: 1
+  .github/workflows/ci.yml:8: `npm run test:unit` — missing-npm-script: expected script 'test:unit' (looked in: package.json) — did you mean 'test:units'?
+FAIL — missing commands/targets/files found.
+$ echo $?
+1
+```
+
+Real captured output from the shipped v0.2 tool (only the root path is
+shortened). The phantom command is caught in milliseconds — locally, or
+as a PR annotation with `--github-annotations` — instead of after a
+push, a runner, and a log dive.
+
 ## What it resolves
 
 | Workflow says | Checked against |
