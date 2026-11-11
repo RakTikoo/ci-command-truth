@@ -1,0 +1,4 @@
+{
+  "name": "bar",
+  "scripts": {"build": "echo b"}
+}
