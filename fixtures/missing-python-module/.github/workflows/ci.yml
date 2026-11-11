@@ -1,0 +1,8 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pkg.mod
+      - run: python -m absentpkg.mod
