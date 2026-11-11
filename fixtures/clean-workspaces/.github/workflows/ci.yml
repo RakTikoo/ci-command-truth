@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm run test --workspace=packages/foo
+      - run: npm run test -w foo
+      - run: npm run root-test --workspaces
+      - run: pnpm --filter foo run test
+      - run: pnpm --filter ./packages/bar run build
+      - run: yarn workspace foo run test
