@@ -15,12 +15,18 @@ malformed resolver files, which are always listed explicitly — never a
 silent pass).
 """
 import argparse
+import ast
+import difflib
 import glob
+import importlib.machinery
 import json
 import os
 import re
 import shlex
 import sys
+import urllib.parse
+
+VERSION = "0.2.0"
 
 MAX_FILE_BYTES = 1_000_000          # cap for any single file we read
 
@@ -115,6 +121,45 @@ YARN_BUILTINS = {
     "set", "get", "dlx", "npm", "plugin", "sdks", "explain", "rebuild",
     "unplug", "stage", "patch", "patchCommit", "search", "constraints",
 }
+
+
+def _suggest(name, candidates):
+    """Deterministic did-you-mean: at most one close match, or None.
+
+    Scores every candidate with difflib ratios against a fixed cutoff;
+    ties break toward the alphabetically first candidate (never
+    difflib's larger-name tie-break), so the result never depends on
+    candidate ordering. Advisory only — it never changes a verdict.
+    """
+    if not name:
+        return None
+    uniq = sorted({c for c in candidates if isinstance(c, str) and c != name})
+    best, best_ratio = None, 0.6
+    for cand in uniq:
+        ratio = difflib.SequenceMatcher(None, name, cand).ratio()
+        if ratio >= 0.6 and (best is None or ratio > best_ratio):
+            best, best_ratio = cand, ratio
+    return best
+
+
+_EXTENSION_SUFFIXES = sorted(importlib.machinery.EXTENSION_SUFFIXES,
+                             key=len, reverse=True)
+
+
+def _compiled_stem(filename):
+    """Stem if `filename` is `<stem><genuine extension suffix>`.
+
+    Uses importlib's platform suffix list, so `mod.abi3.so` counts on
+    Linux while `mod.pyd` (Windows-only) and `mod.notreal.so` do not.
+    The stem itself must be dot-free (module names are).
+    """
+    for suffix in _EXTENSION_SUFFIXES:
+        if filename.endswith(suffix):
+            stem = filename[:-len(suffix)]
+            if stem and "." not in stem:
+                return stem
+            return None
+    return None
 
 
 def read_capped(path):
@@ -1181,17 +1226,22 @@ class Checker:
         if entry not in self.fatal_errors:
             self.fatal_errors.append(entry)
 
-    def finding(self, wf, line, segment, kind, expected, looked_in):
+    def finding(self, wf, line, segment, kind, expected, looked_in,
+                suggestion=None):
+        message = (f"{kind}: expected {expected} (looked in: "
+                   + ", ".join(os.path.relpath(p, self.root)
+                               if os.path.isabs(p) else p
+                               for p in looked_in) + ")")
+        if suggestion:
+            message += f" — did you mean '{suggestion}'?"
         self.findings.append({
             "file": wf, "line": line, "segment": segment, "kind": kind,
             "expected": expected,
             "severity": "warning" if self._downgrade else "error",
+            "suggestion": suggestion,
             "looked_in": [os.path.relpath(p, self.root) if os.path.isabs(p) else p
                           for p in looked_in],
-            "message": f"{kind}: expected {expected} (looked in: "
-                       + ", ".join(os.path.relpath(p, self.root)
-                                   if os.path.isabs(p) else p
-                                   for p in looked_in) + ")",
+            "message": message,
         })
 
     def _within_root(self, path):
@@ -1337,11 +1387,18 @@ class Checker:
             self.checked -= 1
         elif name not in scripts:
             self.finding(wf, line, segment, f"missing-{manager}-script",
-                         f"script '{name}'", [pkg_path])
+                         f"script '{name}'", [pkg_path],
+                         suggestion=_suggest(name, scripts.keys()))
 
     def check_make(self, wf, line, segment, base, target, mkfile=None):
         self.checked += 1
         if not self._within_root(base):
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        if mkfile is not None and not self._within_root(mkfile):
+            # Auditor H1: `make -f ../x.mk` must never read (or leak)
+            # files outside the repo root.
             self.skip("outside-repo-root")
             self.checked -= 1
             return
@@ -1384,11 +1441,17 @@ class Checker:
                 ok = True       # target exists as a file/dir on disk
             if not ok:
                 self.finding(wf, line, segment, "missing-make-target",
-                             f"make target '{target}'", [mk_path])
+                             f"make target '{target}'", [mk_path],
+                             suggestion=_suggest(target, targets))
 
     def check_just(self, wf, line, segment, base, recipe, justfile=None):
         self.checked += 1
         if not self._within_root(base):
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        if justfile is not None and not self._within_root(justfile):
+            # Auditor H1: same outside-root guard as `make -f`.
             self.skip("outside-repo-root")
             self.checked -= 1
             return
@@ -1405,7 +1468,8 @@ class Checker:
             self.finding(wf, line, segment, "missing-justfile", exp, [jf_path])
         elif recipe is not None and recipe not in recipes:
             self.finding(wf, line, segment, "missing-just-recipe",
-                         f"just recipe '{recipe}'", [jf_path])
+                         f"just recipe '{recipe}'", [jf_path],
+                         suggestion=_suggest(recipe, recipes))
 
     def check_file(self, wf, line, segment, base, rel, kind="missing-file"):
         self.checked += 1
@@ -1432,27 +1496,346 @@ class Checker:
             self.finding(wf, line, segment, kind, f"file '{rel}'", [cand])
 
     def _module_exists(self, base, top):
+        return self._top_location(base, top) is not None
+
+    def _top_location(self, base, top):
+        """Locate a top-level module under base or base/src.
+
+        Returns (path, is_dir) or None. A directory counts whether or
+        not it has __init__.py (regular or namespace package), matching
+        the v1 model; a plain ``top.py`` file is a module, not a package.
+        """
         for root_base in (base, os.path.join(base, "src")):
-            if os.path.isdir(os.path.join(root_base, top)):
+            d = os.path.join(root_base, top)
+            if os.path.isdir(d):
+                return d, True
+            f = os.path.join(root_base, top + ".py")
+            if os.path.isfile(f):
+                return f, False
+        return None
+
+    def _local_top_names(self, base):
+        names = set()
+        for root_base in (base, os.path.join(base, "src")):
+            try:
+                entries = os.listdir(root_base)
+            except OSError:
+                continue
+            for e in entries:
+                if e.startswith(".") or e == "__pycache__":
+                    continue
+                full = os.path.join(root_base, e)
+                if os.path.isdir(full):
+                    # Only package-like directories are candidates
+                    # (red team: a docs/ dir of markdown is not a
+                    # top-level Python package suggestion).
+                    try:
+                        inner = os.listdir(full)
+                    except OSError:
+                        continue
+                    if any(x.endswith(".py") or
+                           os.path.isdir(os.path.join(full, x))
+                           for x in inner):
+                        names.add(e)
+                elif e.endswith(".py") and e != "__init__.py":
+                    names.add(e[:-3])
+        return names
+
+    @staticmethod
+    def _dir_child(dirpath, part):
+        """(path, is_dir) for a submodule part inside dirpath, or None.
+
+        Accepts ``part.py``, a ``part/`` directory (regular or namespace
+        package portion), and compiled modules (``part.so`` /
+        ``part.<abi>.so`` / ``part.pyd``).
+        """
+        # CPython's finder gives a package directory precedence over
+        # a same-named module file in the same directory (auditor L7).
+        d = os.path.join(dirpath, part)
+        if os.path.isdir(d):
+            return d, True
+        f = os.path.join(dirpath, part + ".py")
+        if os.path.isfile(f):
+            return f, False
+        try:
+            entries = os.listdir(dirpath)
+        except OSError:
+            return None
+        for e in sorted(entries):
+            # Compiled modules must be real files whose suffix is a
+            # genuine extension suffix on this platform (red team:
+            # `miss.notreal.so`, `miss..so` and directories named
+            # `miss.abi3.so` are not importable modules).
+            if _compiled_stem(e) == part and os.path.isfile(
+                    os.path.join(dirpath, e)):
+                return os.path.join(dirpath, e), False
+        return None
+
+    @staticmethod
+    def _submodule_names(dirpath):
+        names = set()
+        try:
+            entries = os.listdir(dirpath)
+        except OSError:
+            return names
+        for e in entries:
+            if e.startswith(".") or e == "__pycache__":
+                continue
+            full = os.path.join(dirpath, e)
+            if os.path.isdir(full):
+                names.add(e)
+            elif e.endswith(".py") and e != "__init__.py":
+                names.add(e[:-3])
+            else:
+                stem = _compiled_stem(e)
+                if stem:
+                    names.add(stem)
+        return names
+
+    @staticmethod
+    def _package_is_dynamic(dirpath):
+        """True when the package's __init__.py can invent submodules
+        at runtime (PEP 562 __getattr__ / sys.modules tricks). Such
+        submodules cannot be resolved statically, so we skip.
+
+        AST-based (red team): a comment or docstring merely mentioning
+        __getattr__ must NOT disable checking — only a real definition,
+        import or assignment of __getattr__, or a real sys.modules
+        use, counts. An unparseable __init__.py stays dynamic
+        (uncertain → skip).
+        """
+        init = os.path.join(dirpath, "__init__.py")
+        if not os.path.isfile(init):
+            return False
+        text, err = read_capped(init)
+        if text is None:
+            return True           # unreadable: resolution is uncertain
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return True
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and node.name == "__getattr__":
                 return True
-            if os.path.isfile(os.path.join(root_base, top + ".py")):
-                return True
-            if os.path.isfile(os.path.join(root_base, top, "__init__.py")):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    if alias.name == "__getattr__" or \
+                            alias.asname == "__getattr__":
+                        return True
+                    if isinstance(node, ast.ImportFrom) \
+                            and node.module == "sys" \
+                            and alias.name == "modules":
+                        return True
+                    if isinstance(node, ast.Import) \
+                            and alias.name == "sys.modules":
+                        return True
+            if isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id == "__getattr__":
+                        return True
+            if isinstance(node, ast.Attribute) and node.attr == "modules" \
+                    and isinstance(node.value, ast.Name) \
+                    and node.value.id == "sys":
                 return True
         return False
 
+    _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+    @staticmethod
+    def _is_regular_package(dirpath):
+        return os.path.isfile(os.path.join(dirpath, "__init__.py"))
+
+    def _top_locations(self, base, top):
+        """All locations of a top-level module, PEP 420 style.
+
+        Roots are scanned in order (base, then base/src). A regular
+        package (dir with __init__.py) or a module file is a *winner*:
+        it shadows any namespace portions collected before it and is
+        returned alone. Namespace portions (dirs without __init__.py)
+        accumulate — Python merges them across sys.path entries, so a
+        submodule may live in ANY portion.
+        """
+        portions = []
+        for root_base in (base, os.path.join(base, "src")):
+            d = os.path.join(root_base, top)
+            if os.path.isdir(d):
+                if self._is_regular_package(d):
+                    return [(d, True)]
+                portions.append((d, True))
+                continue
+            f = os.path.join(root_base, top + ".py")
+            if os.path.isfile(f):
+                return [(f, False)]
+        return portions
+
+    def _advance(self, dirs, part):
+        """One PEP 420 step across portion dirs, in path order.
+
+        Returns ("winner", path, is_dir) for a file or regular package,
+        ("portions", [dirs]) when only namespace portions matched, or
+        (None,) when the part exists in no portion.
+        """
+        portions = []
+        for d in dirs:
+            child = self._dir_child(d, part)
+            if child is None:
+                continue
+            path, is_dir = child
+            if is_dir and not self._is_regular_package(path):
+                portions.append(path)
+                continue
+            return ("winner", path, is_dir)
+        if portions:
+            return ("portions", portions)
+        return (None,)
+
+    def _resolve_module(self, base, module):
+        """Resolve a dotted module against the local tree.
+
+        Returns ("exists",) / ("missing-top",) / ("dynamic",) /
+        ("missing-sub", dirs, prefix) /
+        ("not-package", path, dotted_name).
+        """
+        parts = module.split(".")
+        tops = self._top_locations(base, parts[0])
+        if not tops:
+            return ("missing-top",)
+        if len(parts) == 1:
+            if len(tops) == 1 and not tops[0][1]:
+                return ("exists",)            # a plain module file
+            dirs = [p for p, _ in tops]
+            # `python -m <package>` executes <package>/__main__.py; a
+            # directory without one is a guaranteed runtime failure,
+            # not an uncertainty (red team).
+            if any(os.path.isfile(os.path.join(d, "__main__.py"))
+                   for d in dirs):
+                return ("exists",)
+            return ("missing-main", dirs, parts[0])
+        if len(tops) == 1 and not tops[0][1]:
+            return ("not-package", tops[0][0], parts[0])
+        dirs = [p for p, _ in tops]
+        prefix = parts[0]
+        for idx, part in enumerate(parts[1:], start=1):
+            if any(self._package_is_dynamic(d) for d in dirs):
+                return ("dynamic",)
+            adv = self._advance(dirs, part)
+            if adv[0] is None:
+                return ("missing-sub", dirs, prefix)
+            is_last = idx == len(parts) - 1
+            if adv[0] == "portions":
+                if is_last:
+                    if any(os.path.isfile(os.path.join(d, "__main__.py"))
+                           for d in adv[1]):
+                        return ("exists",)
+                    return ("missing-main", adv[1], module)
+                dirs = adv[1]
+                prefix = prefix + "." + part
+                continue
+            _, path, is_dir = adv
+            if is_last:
+                if not is_dir:
+                    return ("exists",)
+                if os.path.isfile(os.path.join(path, "__main__.py")):
+                    return ("exists",)
+                return ("missing-main", [path], module)
+            if not is_dir:
+                return ("not-package", path, prefix + "." + part)
+            dirs = [path]
+            prefix = prefix + "." + part
+        return ("exists",)
+
+    def _module_fully_resolves(self, base, module):
+        return self._resolve_module(base, module)[0] == "exists"
+
+    def _top_shadows_stdlib(self, base, top):
+        """True when the local top-level entry would shadow a stdlib
+        module of the same name at runtime: a single winning location
+        that is a module file or a regular package. Merged namespace
+        portions do not shadow a stdlib regular package."""
+        locs = self._top_locations(base, top)
+        if len(locs) != 1:
+            return False
+        path, is_dir = locs[0]
+        return (not is_dir) or self._is_regular_package(path)
+
     def check_python_module(self, wf, line, segment, base, module):
         self.checked += 1
-        top = module.split(".")[0]
-        candidates = []
-        for root_base in (base, os.path.join(base, "src")):
-            candidates.append(os.path.join(root_base, top))
-            candidates.append(os.path.join(root_base, top + ".py"))
-            candidates.append(os.path.join(root_base, top, "__init__.py"))
-        if not self._module_exists(base, top):
+        if not self._within_root(base):
+            # Red team: every other checker has this guard; a `cd`
+            # out of the repo must not resolve or flag outside paths.
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        parts = module.split(".")
+        top = parts[0]
+        if any(not self._IDENT_RE.match(p) for p in parts):
+            # Not a valid dotted module name (e.g. contains dashes or
+            # empty parts): the parts cannot be resolved — but only
+            # when the literal top-level entry exists on disk. A top
+            # that exists in NO form is a plain missing top (red team:
+            # `python -m totallymissing-thing` failed at runtime too).
+            literal_top = any(
+                os.path.isdir(os.path.join(rb, top))
+                or os.path.isfile(os.path.join(rb, top + ".py"))
+                for rb in (base, os.path.join(base, "src")))
+            if literal_top:
+                self.skip("unresolvable-module-name")
+                self.checked -= 1
+                return
+        roots = [os.path.join(base, top),
+                 os.path.join(base, "src", top)]
+        res = self._resolve_module(base, module)
+        status = res[0]
+        if status == "exists":
+            return
+        if status == "dynamic":
+            self.skip("dynamic-module")
+            self.checked -= 1
+            return
+        if status == "missing-top":
+            # Top level is not repo-local: existing v1 finding, with a
+            # did-you-mean only when correcting the top level alone
+            # yields a module that fully resolves (never a guess).
+            suggestion = None
+            sug_top = _suggest(top, self._local_top_names(base))
+            if sug_top is not None:
+                corrected = ".".join([sug_top] + parts[1:])
+                if self._module_fully_resolves(base, corrected):
+                    suggestion = corrected
             self.finding(wf, line, segment, "missing-python-module",
-                         f"top-level Python package '{top}' (from -m {module})",
-                         candidates[::3])
+                         f"top-level Python package '{top}' "
+                         f"(from -m {module})", roots,
+                         suggestion=suggestion)
+            return
+        if status == "not-package":
+            self.finding(wf, line, segment, "missing-python-module",
+                         f"Python submodule '{module}' (from -m {module}): "
+                         f"'{res[2]}' is a module file, not a package",
+                         [res[1]])
+            return
+        if status == "missing-main":
+            _, dirs, _name = res
+            self.finding(wf, line, segment, "missing-python-module",
+                         f"Python package '{module}' has no __main__.py "
+                         f"(from -m {module})",
+                         [os.path.join(d, "__main__.py") for d in dirs])
+            return
+        # missing-sub: the parent package is repo-local but this part
+        # exists in none of its (possibly merged namespace) portions.
+        # Similarity is judged on the differing segment only (red
+        # team: the shared dotted prefix inflated full-string ratios
+        # until unrelated siblings always cleared the cutoff).
+        _, dirs, prefix = res
+        names = set()
+        for d in dirs:
+            names |= self._submodule_names(d)
+        missing_part = parts[len(prefix.split("."))]
+        sug_part = _suggest(missing_part, names)
+        suggestion = (prefix + "." + sug_part) if sug_part else None
+        self.finding(wf, line, segment, "missing-python-module",
+                     f"Python submodule '{module}' (from -m {module})",
+                     list(dirs), suggestion=suggestion)
 
     def resolve_workspace_member(self, base, val):
         """Resolve a --workspace/--filter value to a member dir or None."""
@@ -1840,10 +2223,19 @@ class Checker:
                     self.skip("variable-argument"); return
                 top = module.split(".")[0]
                 # Stdlib modules (http.server, unittest, ...) are not
-                # repo-local.
+                # repo-local — UNLESS a local regular package or module
+                # file shadows the stdlib name (auditor M1). A mere
+                # namespace portion does NOT shadow it: the stdlib
+                # regular package wins over namespace portions, so
+                # those keep the v1 skip.
                 stdlib = getattr(sys, "stdlib_module_names", frozenset())
                 if top in stdlib:
-                    self.skip("external-tool"); return
+                    if self._top_shadows_stdlib(base, top):
+                        self.check_python_module(
+                            wf, line, seg, base, module)
+                    else:
+                        self.skip("external-tool")
+                    return
                 # Repo-local existence is checked FIRST.
                 if self._module_exists(base, top):
                     self.check_python_module(wf, line, seg, base, module)
@@ -2138,15 +2530,148 @@ def render_text(r):
     return "\n".join(out)
 
 
+def _escape_annotation_data(text):
+    return (str(text).replace("%", "%25").replace("\r", "%0D")
+            .replace("\n", "%0A"))
+
+
+def _escape_annotation_prop(text):
+    # GitHub workflow-command property values additionally escape
+    # ':' and ',' (auditor M3).
+    return (_escape_annotation_data(text)
+            .replace(":", "%3A").replace(",", "%2C"))
+
+
 def render_annotations(r):
     lines = []
     for f in r["findings"]:
-        msg = f["message"].replace("%", "%25").replace("\n", "%0A")
+        msg = _escape_annotation_data(f["message"])
         level = "warning" if f.get("severity") == "warning" else "error"
-        lines.append(f"::{level} file={f['file']},line={f['line']}::{msg}")
+        lines.append(f"::{level} file={_escape_annotation_prop(f['file'])}"
+                     f",line={f['line']}::{msg}")
     for u in r["unscanned"]:
-        lines.append(f"::warning file={u['file']}::unscanned: {u['reason']}")
+        lines.append(
+            f"::warning file={_escape_annotation_prop(u['file'])}::"
+            f"unscanned: {_escape_annotation_data(u['reason'])}")
     return lines
+
+
+# --------------------------------------------------------------------------
+# SARIF 2.1.0 output
+#
+# Findings become results (error findings -> level "error",
+# warning-severity findings -> level "warning"). Unscanned files are
+# NOT results and never fabricate a clean pass: they are carried as
+# tool-execution notifications (level "error") on the run's invocation,
+# with the count also in run properties, mirroring exit code 2.
+# Artifact locations are repo-relative URIs, percent-encoded, so no
+# absolute path and no control character from workflow text can break
+# or leak through the document.
+# --------------------------------------------------------------------------
+_SARIF_KIND_TEXT = {
+    "missing-npm-script": "npm script referenced by a workflow does not exist",
+    "missing-pnpm-script": "pnpm script referenced by a workflow does not exist",
+    "missing-yarn-script": "yarn script referenced by a workflow does not exist",
+    "missing-bun-script": "bun script referenced by a workflow does not exist",
+    "missing-makefile": "Makefile referenced by a workflow does not exist",
+    "missing-make-target": "make target referenced by a workflow does not exist",
+    "missing-justfile": "justfile referenced by a workflow does not exist",
+    "missing-just-recipe": "just recipe referenced by a workflow does not exist",
+    "missing-file": "file referenced by a workflow does not exist",
+    "missing-script-file": "script file referenced by a workflow does not exist",
+    "missing-requirements-file": "requirements file referenced by a workflow does not exist",
+    "missing-python-module": "Python module referenced by a workflow does not exist",
+    "unscanned-workflow": "workflow file could not be scanned",
+}
+
+
+def _sarif_uri(rel_path):
+    # quote_from_bytes over the filesystem encoding: a legal but
+    # non-UTF-8 filename (surrogates under surrogateescape) must
+    # percent-encode, never crash the whole SARIF document (red team).
+    rel = str(rel_path).replace(os.sep, "/")
+    return urllib.parse.quote_from_bytes(os.fsencode(rel), safe="/")
+
+
+def render_sarif(r):
+    # Stable taxonomy (auditor L3): the full rule table is emitted on
+    # every run, plus any kind this run produced that is not in it, so
+    # every result/notification ruleId always resolves.
+    kinds = sorted(set(_SARIF_KIND_TEXT)
+                   | {f["kind"] for f in r["findings"]})
+    rules = []
+    for kind in kinds:
+        text = _SARIF_KIND_TEXT.get(
+            kind, "workflow reference does not resolve: " + kind)
+        rules.append({
+            "id": kind,
+            "name": kind,
+            "shortDescription": {"text": text},
+            "fullDescription": {"text": text},
+            "properties": {"precision": "high"},
+        })
+    results = []
+    for f in r["findings"]:
+        props = {
+            "kind": f["kind"],
+            "segment": f["segment"],
+            "expected": f["expected"],
+            "severity": f.get("severity", "error"),
+            "lookedIn": [_sarif_uri(p) for p in f.get("looked_in", [])],
+        }
+        if f.get("suggestion"):
+            props["suggestion"] = f["suggestion"]
+        results.append({
+            "ruleId": f["kind"],
+            "level": "warning" if f.get("severity") == "warning" else "error",
+            "message": {"text": f["message"]},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": _sarif_uri(f["file"])},
+                    "region": {"startLine": max(1, int(f["line"]))},
+                },
+            }],
+            "properties": props,
+        })
+    notifications = [{
+        "level": "error",
+        "message": {"text": f"unscanned: {u['file']} — {u['reason']}"},
+        "associatedRule": {"id": "unscanned-workflow"},
+        "locations": [{
+            "physicalLocation": {
+                "artifactLocation": {"uri": _sarif_uri(u["file"])},
+                "region": {"startLine": 1},
+            },
+        }],
+        "properties": {"file": u["file"], "reason": u["reason"]},
+    } for u in r["unscanned"]]
+    run = {
+        "tool": {"driver": {
+            "name": "CI Command Truth",
+            "version": VERSION,
+            "semanticVersion": VERSION,
+            "informationUri": "https://github.com/RakTikoo/ci-command-truth",
+            "rules": rules,
+        }},
+        "invocations": [{
+            # The scan itself did not complete cleanly when files were
+            # left unscanned (auditor L2).
+            "executionSuccessful": not r["unscanned"],
+            "toolExecutionNotifications": notifications,
+        }],
+        "results": results,
+        "properties": {
+            "checked": r["checked"],
+            "skipped": r["skipped"],
+            "unscannedCount": len(r["unscanned"]),
+            "exitCode": r["exit"],
+        },
+    }
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [run],
+    }
 
 
 def main(argv=None):
@@ -2155,14 +2680,37 @@ def main(argv=None):
     ap.add_argument("root", nargs="?", default=".",
                     help="repository root (default: current directory)")
     ap.add_argument("--json", action="store_true", help="JSON output")
+    ap.add_argument("--sarif", action="store_true",
+                    help="SARIF 2.1.0 output (mutually exclusive with --json)")
     ap.add_argument("--github-annotations", action="store_true",
                     help="also emit ::error/::warning workflow commands")
     args = ap.parse_args(argv)
+    if args.json and args.sarif:
+        ap.error("--json and --sarif are mutually exclusive output modes")
+    if args.github_annotations and (args.json or args.sarif):
+        # Auditor M2: appending annotation lines to a JSON/SARIF
+        # document corrupts it for machine consumers. Annotations pair
+        # with the default text output (as the bundled Action uses).
+        ap.error("--github-annotations cannot be combined with "
+                 "--json or --sarif (it would corrupt the document)")
     if not os.path.isdir(args.root):
+        if args.sarif:
+            bad = {"root": args.root, "workflows": [],
+                   "unscanned": [{"file": args.root,
+                                  "reason": "root is not a directory"}],
+                   "findings": [], "checked": 0, "skipped": {},
+                   "warnings": [], "exit": 2}
+            print(json.dumps(render_sarif(bad), indent=2, sort_keys=True))
+        elif args.json:
+            print(json.dumps(
+                {"error": f"root {args.root!r} is not a directory",
+                 "exit": 2}, indent=2, sort_keys=True))
         print(f"error: root {args.root!r} is not a directory", file=sys.stderr)
         return 2
     r = scan(args.root)
-    if args.json:
+    if args.sarif:
+        print(json.dumps(render_sarif(r), indent=2, sort_keys=True))
+    elif args.json:
         print(json.dumps(r, indent=2, sort_keys=True))
     else:
         print(render_text(r))

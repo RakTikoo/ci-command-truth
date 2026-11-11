@@ -120,11 +120,13 @@ the published checks list, not a source audit or a differential run.)
   anchors/tags (stripped), per-job `defaults:`. No flow style and no
   multi-document files — a file mentioning `run:` that yields no
   steps is listed as unscanned, not passed.
-- **`python -m` is conservative by design:** only the *top-level*
-  package is checked, only when it is neither stdlib nor a known
-  installed tool and the workflow does not install Python packages,
-  and `src/` layout is recognised. A typo'd *submodule*
-  (`python -m pkg.typo`) is not caught.
+- **`python -m` is conservative by design:** *(v0.2: submodules of a
+  repo-local top-level package ARE now checked — see the v0.2 section
+  below.)* Non-local modules are only checked at the top level, only
+  when the top is neither stdlib (unless a local regular package
+  shadows the stdlib name) nor a known installed tool and the
+  workflow does not install Python packages; `src/` layout is
+  recognised.
 - **Monorepos (partial):** workspace-member resolution works when the
   member is identifiable — an explicit `--workspace` / `-w` /
   `--filter` / `yarn workspace` value that is an existing path or a
@@ -149,13 +151,12 @@ the published checks list, not a source audit or a differential run.)
 1. More ecosystems behind the same interface: `cargo` (workspace bins),
    `go run ./cmd/...`, `task` (Taskfile), `tox`/`nox` environments,
    `composer run`, `bundle exec rake` targets, Rakefile.
-2. `python -m` submodule checking when the top-level package is
-   repo-local (safe then: no installed-tool ambiguity).
+2. ~~`python -m` submodule checking when the top-level package is
+   repo-local~~ — **done in v0.2** (see below).
 3. Full monorepo resolution beyond identifiable workspace selectors.
 4. Optional `--strict-skips` mode that fails on skipped segments for
    repos that want full proof rather than best-effort.
-5. SARIF output for code-scanning upload, in addition to the existing
-   `--github-annotations` and `--json`.
+5. ~~SARIF output for code-scanning upload~~ — **done in v0.2**.
 
 (Done in the fix pass below, previously on this ladder: npm/pnpm/yarn
 workspace selectors, Makefile `include` following, justfile
@@ -359,3 +360,182 @@ trailing comments, `||` and `continue-on-error` downgrades,
 - Heredoc/substitution handling is a pragmatic subset (see Known
   limitations); anything unrecognised degrades to a named skip.
 
+
+---
+
+## v0.2 wave (2026-11-10) — SARIF, did-you-mean, `python -m` submodules, dogfood
+
+Status: local build only, NOT pushed (push/tag is a separate decision).
+Tool version constant is now `0.2.0`.
+
+### What was built
+
+1. **SARIF output (`--sarif`).** SARIF 2.1.0, mirroring the `--json`
+   pattern; `--json` + `--sarif` together are a usage error (exit 2),
+   and `--github-annotations` now also rejects combination with either
+   machine mode (it appended lines to the document and corrupted it —
+   auditor M2; it still pairs with the default text output the bundled
+   Action uses). Findings → results with level error/warning by
+   severity, locations at workflow file + line, a stable full rule
+   table on every run, tool name/version. Unscanned files are
+   error-level `toolExecutionNotifications` (never results), with
+   `unscannedCount`/`exitCode` in run properties and
+   `executionSuccessful: false` when any file is unscanned. Artifact
+   URIs are percent-encoded repo-relative paths via
+   `quote_from_bytes(os.fsencode(...))` (a non-UTF-8 filename crashed
+   the naive `quote()` — red team, fixed + regression test).
+2. **Did-you-mean.** `_suggest()` scores candidates with difflib
+   ratios (cutoff 0.6, at most one, ties break alphabetically).
+   Attached for missing npm/pnpm/yarn scripts, make targets, just
+   recipes and `python -m` modules; appears in text, `--json`
+   (`suggestion` field on every finding), SARIF (message +
+   properties) and annotations. Never changes verdict/severity/exit.
+   For submodules, similarity is judged on the differing segment only
+   (red team: the shared dotted prefix inflated full-string ratios so
+   unrelated siblings always "matched"). Unknown candidate sets (no
+   package.json/Makefile/justfile) yield no suggestion.
+3. **`python -m` submodule checking** — only when the top-level
+   package is repo-local (step base or `src/` layout), per the v1
+   expansion ladder. A PEP 420 resolver merges namespace portions
+   across both roots at every level (a regular package / module file
+   is a winner that shadows portions); parts accept `part.py`,
+   `part/` dirs, and compiled modules with a genuine platform
+   extension suffix (`importlib.machinery.EXTENSION_SUFFIXES`, real
+   files only). A directory used as the final `-m` target must
+   contain `__main__.py` — anything else is a guaranteed runtime
+   failure, not an uncertainty. Packages whose `__init__.py` (AST
+   check: real def/import/assignment of `__getattr__`, or real
+   `sys.modules` use; comments/docstrings do not count) can invent
+   submodules skip as `dynamic-module`; unparseable `__init__.py`
+   also skips. Non-identifier parts skip as
+   `unresolvable-module-name` when the literal top exists on disk;
+   a wholly nonexistent top is a normal missing-top finding. A local
+   regular package shadows a same-named stdlib module and is then
+   submodule-checked (auditor M1); a namespace-only namesake does
+   not shadow stdlib. Non-local behaviour is otherwise exactly v1.
+4. **Dogfood + consumer-Action simulation** (below). The project's
+   own `.github/workflows/tests.yml` already contained the self-check
+   step (`python3 ci_command_truth.py . --github-annotations`); it was
+   verified present and the own-tree run stays clean (2 checked, 0
+   findings). A real `uses: RakTikoo/ci-command-truth@v...` run on
+   GitHub still only happens after a push/tag decision.
+
+### Corpus before/after (explicit changes, never silent)
+
+- Fixtures 44 → **47**: clean 29 → **31** (new
+  `clean-python-submodule` — incl. `src/` layout; new
+  `clean-python-namespace`), planted missing 6 → **7** (new
+  `missing-python-submodule`: `pkg.modd` beside real `pkg.mod`,
+  exactly 1 finding, suggestion `pkg.mod`), edge 8, special 1.
+- **Fixture corrections forced by the submodule check:** the v1
+  fixtures `clean-python-known`, `clean-python-flags` and
+  `clean-install-python-m` all reference `python -m pkg.mod` but
+  contained only `pkg/__init__.py` — v1 never actually resolved
+  `mod`. Each gained the `pkg/mod.py` its workflow always claimed,
+  and `clean-python-submodule`'s `pkg/nested/` gained the
+  `__main__.py` its `python -m pkg.nested` run requires. Without
+  these, the new check would (correctly) have flagged them.
+- Score after: **31/31 clean, 7/7 planted (0 extra findings), 8/8
+  edge, 1/1 special.**
+- Tests: `run_tests.py` 33 → **70 tests, all passing** (suggestion
+  unit tests incl. no-suggestion/determinism/tie-break; submodule,
+  namespace-split, dynamic, stdlib-shadow and `__main__` tests; SARIF
+  structure/rule-crossref/level/unscanned/escaping/mutual-exclusion/
+  exit-code tests; review regression tests). `spotcheck_fp.py`
+  10 → **14/14** (adds namespace, src-layout, dynamic-module and
+  split-namespace cases).
+
+### Dogfood (v0.2 tool, hand-labelled)
+
+| Root | Workflows | Checked | Skipped | Findings | Hand label |
+|---|---|---|---|---|---|
+| skillscan-src | 1 | 6 | 0 | 0 | TN |
+| kicad-preflight-src | 1 | 3 | 0 | 0 | TN |
+| stranger-suite-src | 1 | 1 | 0 | 0 | TN |
+| round3-trio/expiry-radar | 1 | 3 | 2 (shell-builtin) | 0 | TN |
+| round3-trio/phantomdep-pr-gate | 0 | 0 | 0 | 0 (1 unscanned: no `.github/workflows/` dir, exit 2) | Expected — this product intentionally has no tests workflow of its own (its Action runs in consumer repos); not a finding |
+| ci-command-truth (own tree) | 1 | 2 | 0 | 0 | TN |
+| benchmarks/tools/spector-src (regression extra) | 4 | 8 | 89 | 0 | TN — checked/findings identical to v1 |
+
+Consumer-Action simulation (scratch repo outside the product tree,
+`~/workspace/agentic-spikes/scratch/cct-consumer-sim/`, log in
+`simulation.log` there): a consumer repo using the bundled composite
+action (local-path `uses:` form) with the action's run block executed
+exactly as written in `action.yml` — (a) clean consumer: exit 0,
+3 checked, 0 findings; (b) planted `npm run nosuchscript`: exit 1
+with `::error file=.github/workflows/ci.yml,line=7::…` annotation.
+Re-run with the final post-review build: identical results.
+
+### Adversarial review (3 independent reviewers) and fix pass
+
+- **False-positive hunter:** 48 fresh sandboxes + 3 SARIF repos, 40
+  runtime-verified clean with real CPython. **1 HIGH root cause:**
+  namespace packages split across root/`src/` portions were falsely
+  flagged (5 sandboxes, incl. a misleading suggestion). Root cause:
+  the walk committed to the first root. Fixed with the PEP 420
+  multi-portion resolver above + 4 unit tests + 1 spotcheck case;
+  hunter's case 04a re-run clean. 2 LOWs (top-level `.so` message
+  wording; SARIF `results: []` on unscanned repos — mitigated by
+  design via notifications + properties) recorded; the first is
+  accepted (the verdict matches real `python -m` behaviour), the
+  second is the documented design.
+- **Code auditor:** 0 Critical, **1 High, 3 Medium, 7 Low**.
+  H1 `make -f`/`just -f` escaped the repo root (outside files read,
+  outside paths leaked into `looked_in`/SARIF) — fixed with
+  `_within_root` guards on both file arguments (this was a v1 bug;
+  SARIF/`looked_in` made the leak visible). M1 stdlib-named local
+  packages never submodule-checked — fixed (shadowing rule above).
+  M2 `--json`/`--sarif` + `--github-annotations` corrupted stdout —
+  fixed (combination rejected, exit 2). M3 annotation `file=`
+  properties and unscanned lines unescaped — fixed with GitHub
+  property escaping (`% \r \n : ,`) + hostile-filename test. Lows
+  fixed: dead `defaultConfiguration` ternary removed, SARIF rule
+  table stabilised, `executionSuccessful` reflects unscanned files,
+  bad root emits a machine-readable document in `--json`/`--sarif`
+  modes, `_dir_child` gives a package dir precedence over a
+  same-named module file (CPython order). L6 (`informationUri`)
+  assessed not-a-defect: the repo is live, the URI is correct.
+  Clean areas confirmed by the auditor: determinism across
+  PYTHONHASHSEED values in all modes, the full exit-code matrix
+  (36/36), stdlib-only imports, static-safety (no
+  subprocess/eval/exec/os.system strings), and finding-shape
+  consistency across all fixtures.
+- **Red team:** 3 High, 8 Medium, 2 Low (several Mediums duplicated
+  auditor items already fixed in the parallel pass: `-f` escape,
+  annotation injection, `executionSuccessful`). New fixes:
+  SARIF crash on non-UTF-8 filenames (bytes quoting); `python -m`
+  was the only checker without an outside-root guard for a `cd`'d
+  base (fixed + test); final-directory `-m` targets require
+  `__main__.py`; dynamic-package detection moved from substring to
+  AST (comment-planted bypass closed); compiled-module acceptance
+  tightened to genuine platform suffixes + real files;
+  non-identifier module names no longer suppress the missing-top
+  check when nothing exists on disk; submodule suggestions judged
+  on the differing segment; suggestion tie-break and top-level
+  candidate hygiene (package-like dirs only).
+  **Accepted, not fixed (documented):** the unconditional `src/`
+  fallback and untracked `env -C`/`pushd` directory changes — both
+  are the pre-existing v1 model (the v0.2 spec retains `src/` "per
+  existing logic"; shell tracking is the documented pragmatic
+  subset), and changing them is a separate slice, not this wave.
+
+### Remaining limitations (v0.2 additions)
+
+- `python -m` resolution models `sys.path` as (step base, `src/`)
+  only — PYTHONPATH entries, editable-install `.pth` targets beyond
+  `src/`, and venv site-packages are not modelled; anything they
+  would resolve that is not repo-local stays skipped or top-level
+  only, per the design rule.
+- A final-directory `-m` target is judged on `__main__.py` presence
+  in the merged portions; a `__main__.py` that itself imports missing
+  modules is out of scope (existence, not execution).
+- Did-you-mean uses plain string ratios: it can suggest a
+  semantically unrelated but textually close name; it remains
+  advisory-only for exactly that reason.
+- SARIF validation is structural (schema-shape, rule cross-refs,
+  level values) — no official SARIF validator was run locally.
+- Top-level compiled modules (bare `name.so`) are still reported as
+  a missing top-level package: the verdict matches real `python -m`
+  (which cannot execute an extension module), but the wording does
+  not distinguish "exists as compiled module" (FP hunter LOW,
+  accepted).

@@ -150,6 +150,50 @@ def _():
     }), ("created earlier in workflow",)
 
 
+@case("v0.2 namespace package submodule")
+def _():
+    return build({
+        ".github/workflows/ci.yml": HDR +
+        "      - run: python -m nspkg.mod\n"
+        "      - run: python -m nspkg.inner.leaf\n",
+        "nspkg/mod.py": "x = 1\n",
+        "nspkg/inner/leaf.py": "x = 1\n",
+    }), ()
+
+
+@case("v0.2 src-layout submodule")
+def _():
+    return build({
+        ".github/workflows/ci.yml": HDR +
+        "      - run: python -m spkg.run\n"
+        "      - run: python -m spkg.deep.leaf\n",
+        "src/spkg/__init__.py": "",
+        "src/spkg/run.py": "x = 1\n",
+        "src/spkg/deep/__init__.py": "",
+        "src/spkg/deep/leaf.py": "x = 1\n",
+    }), ()
+
+
+@case("v0.2 dynamic module (__getattr__) skipped")
+def _():
+    return build({
+        ".github/workflows/ci.yml": HDR +
+        "      - run: python -m pkg.lazything\n",
+        "pkg/__init__.py": "def __getattr__(name):\n    return object()\n",
+    }), ("dynamic-module",)
+
+
+@case("v0.2 split namespace root+src portions")
+def _():
+    return build({
+        ".github/workflows/ci.yml": HDR +
+        "      - run: python -m pkg.a\n"
+        "      - run: python -m pkg.b\n",
+        "pkg/a.py": "x = 1\n",
+        "src/pkg/b.py": "x = 1\n",
+    }), ()
+
+
 @case("second checkout with path:")
 def _():
     return build({

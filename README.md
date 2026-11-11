@@ -18,7 +18,7 @@ dependencies.
 | `make X`, `make -C dir X`, `make -f file X`, bare `make` | targets in the `Makefile` / `makefile` / `GNUmakefile`, following `include` files; a target matching a pattern/suffix rule, or existing as a file/dir on disk, counts as present |
 | `just X`, `just -f file X`, bare `just` | recipes in `justfile` / `Justfile` / `.justfile`, following `mod` / `import` files; recipes with parameter defaults (`build target='release':`), `@quiet` recipes and `alias` names all count |
 | `./scripts/x.sh`, `bash x.sh`, `sh ./x.sh`, `python x.py`, `python3 ./x.py`, `node x.js` | the file existing on disk (per-interpreter flag tables: `bash -e` is a mode flag, only `-c` is inline code; `python -W ignore -m pkg` finds the module) |
-| `python -m pkg.mod` | top-level package existing (`pkg/`, `pkg.py`, or under `src/`) — conservative: repo-local existence is checked first; stdlib modules (`http.server`, `unittest`, …) and known installed tools (`build`, `pytest`, `coverage`, …) are assumed installed; if the workflow itself installs Python packages (`pip install`, `poetry install`, …), unknown modules are skipped as *assumed installed* |
+| `python -m pkg.mod` | the full dotted path, **when the top-level package is repo-local** (`pkg/`, `pkg.py`, or under `src/`): every submodule part must resolve (`pkg/mod.py`, `pkg/mod/` regular or namespace package — namespace portions merged across the root and `src/` trees, PEP 420 style — or a compiled module with a genuine platform extension suffix), and a package used as the final target must contain `__main__.py`. Conservative otherwise: repo-local existence is checked first (a local regular package even shadows a stdlib name); stdlib modules (`http.server`, `unittest`, …) and known installed tools (`build`, `pytest`, `coverage`, …) are assumed installed; if the workflow itself installs Python packages (`pip install`, `poetry install`, …), unknown modules are skipped as *assumed installed*; a package whose `__init__.py` really defines/imports `__getattr__` or uses `sys.modules` can invent submodules at runtime, so its submodules are skipped as `dynamic-module` |
 | `pip install -r req.txt` / `-c constraints.txt` | the file existing on disk |
 
 It also unwraps runner prefixes (`uv run make lint`, `poetry run …`,
@@ -66,8 +66,26 @@ False positives are the bug this tool refuses to have:
 ```console
 $ python3 ci_command_truth.py [ROOT]          # ROOT defaults to .
 $ python3 ci_command_truth.py . --json        # machine-readable report
+$ python3 ci_command_truth.py . --sarif       # SARIF 2.1.0 report (for GitHub code-scanning upload)
 $ python3 ci_command_truth.py . --github-annotations   # ::error file=…,line=… lines for PR annotations
 ```
+
+`--json` and `--sarif` are mutually exclusive, and `--github-annotations`
+pairs with the default text output only (appending annotation lines to a
+JSON/SARIF document would corrupt it, so the combination is rejected with
+exit 2). In SARIF output, findings are results (error findings → `error`,
+warning-severity findings → `warning`) located at the workflow file and
+line; files that could not be scanned are **not** results — they appear as
+error-level tool-execution notifications, with the unscanned count in the
+run properties, mirroring exit code 2. Artifact locations are
+percent-encoded repo-relative URIs; no absolute paths are emitted.
+
+When a referenced script, target, recipe or module is missing and a close
+match exists, every output adds a **did-you-mean** suggestion (e.g.
+``did you mean 'test:units'?``) computed with stdlib `difflib` —
+deterministic, at most one suggestion, judged on the differing name
+segment only. A suggestion is advisory: it never changes a verdict,
+severity or exit code, and unrelated names get no suggestion.
 
 Every report states: workflows scanned, segments **checked**, segments
 **skipped (by reason)**, every finding as `file:line`, the offending
@@ -129,16 +147,16 @@ scripts, or workflow commands (a test asserts the source contains no
 ## Tests
 
 ```console
-$ python3 run_tests.py     # 33 tests, zero dependencies
-$ python3 spotcheck_fp.py  # 10 false-positive headline cases, fresh sandboxes
+$ python3 run_tests.py     # 70 tests, zero dependencies
+$ python3 spotcheck_fp.py  # 14 false-positive headline cases, fresh sandboxes
 ```
 
-Fixture corpus in `fixtures/`: 29 clean repos that must produce zero
-findings, 6 repos with exactly one planted missing reference each, 8
+Fixture corpus in `fixtures/`: 31 clean repos that must produce zero
+findings, 7 repos with exactly one planted missing reference each, 8
 edge-case repos (no-run, uses-only, empty, malformed, CRLF, nested
 workflow subdirectory, empty workflows dir, malformed package.json),
 and 1 downgrade repo (warning-severity findings, exit 0). See
-ANALYSIS.md for the score.
+ANALYSIS.md for the score, including the v0.2 section.
 
 ## License
 
