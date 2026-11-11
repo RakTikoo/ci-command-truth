@@ -1,0 +1,8 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: uv run make test
+      - run: poetry run npm run test
