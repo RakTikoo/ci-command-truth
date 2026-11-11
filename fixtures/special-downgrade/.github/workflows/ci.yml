@@ -1,0 +1,10 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm run nope || true
+      - run: npm run test
+      - continue-on-error: true
+        run: npm run nope2
