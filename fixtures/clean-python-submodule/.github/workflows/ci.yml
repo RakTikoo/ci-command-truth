@@ -1,0 +1,10 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pkg.mod
+      - run: python -m pkg.nested
+      - run: python -m pkg.nested.leaf
+      - run: python3 -m spkg.run
