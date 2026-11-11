@@ -1,6 +1,6 @@
 # CI Command Truth — Analysis
 
-Date: 2026-11-10. Status: local build only (not pushed, per H-1B gate).
+Date: 2026-11-10. Status: pushed — github.com/RakTikoo/ci-command-truth, v0.2 tagged at commit 1d9cbaa, CI green (run #115, 70 tests). (Corrected 2026-11-11: the original status line said "local build only (not pushed)", which went stale after the approved push; the H-1B gate still applies to promotion/monetisation.)
 
 ## Fixture corpus score
 
@@ -170,8 +170,9 @@ workspace selectors, Makefile `include` following, justfile
   renders as PR annotations on the exact workflow line, and
   `::warning` lines for unscanned files. Exit 1 fails the job.
   `action.yml` in this repo wraps the same command as a composite
-  action, so `uses: <owner>/ci-command-truth@v1` would work the day it
-  is published (it is **not** published — local build only).
+  action, and it is published: consumers pin
+  `uses: RakTikoo/ci-command-truth@v0.2` (there is no `v1` tag — the
+  first tagged release is `v0.2`).
 - **Next:** a pre-commit hook entry and a `problemMatcher` JSON for
   editor integration are trivial additions on the same output format.
 - **Not planned:** a hosted service. The tool's value is that it is
@@ -365,7 +366,9 @@ trailing comments, `||` and `continue-on-error` downgrades,
 
 ## v0.2 wave (2026-11-10) — SARIF, did-you-mean, `python -m` submodules, dogfood
 
-Status: local build only, NOT pushed (push/tag is a separate decision).
+Status at build time: local build only, NOT pushed. Superseded
+2026-11-10 — this wave was pushed the same day and tagged `v0.2` at
+commit 1d9cbaa (CI run #115 success, 70 tests).
 Tool version constant is now `0.2.0`.
 
 ### What was built
@@ -417,8 +420,11 @@ Tool version constant is now `0.2.0`.
    own `.github/workflows/tests.yml` already contained the self-check
    step (`python3 ci_command_truth.py . --github-annotations`); it was
    verified present and the own-tree run stays clean (2 checked, 0
-   findings). A real `uses: RakTikoo/ci-command-truth@v...` run on
-   GitHub still only happens after a push/tag decision.
+   findings). A real cross-repo `uses: RakTikoo/ci-command-truth@v0.2`
+   run on GitHub has NOT happened yet (verified 2026-11-11: no
+   dogfood/consumer repo exists for this project) — the push and the
+   `v0.2` tag are done, so a live dogfood run is the remaining proof
+   step.
 
 ### Corpus before/after (explicit changes, never silent)
 
