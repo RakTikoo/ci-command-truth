@@ -1,0 +1,12 @@
+[package]
+name = "singlecrate"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "singlecrate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "singlecrate"
+path = "src/main.rs"
