@@ -1,5 +1,5 @@
 name: CI Command Truth
-description: Prove every run: command in .github/workflows exists (npm/pnpm/yarn scripts, make targets, just recipes, script files, python -m modules, pip -r files).
+description: "Prove every run: command in .github/workflows exists (npm/pnpm/yarn scripts, make targets, just recipes, script files, python -m modules, pip -r files)."
 author: RakTikoo
 branding:
   icon: check-circle

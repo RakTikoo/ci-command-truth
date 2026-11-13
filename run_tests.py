@@ -788,5 +788,61 @@ class V02Tests(unittest.TestCase):
         self.assertEqual(run_tool_mode("edge-empty", "--sarif").returncode, 2)
 
 
+class ActionManifestTests(unittest.TestCase):
+    """The published action.yml must stay loadable by GitHub.
+
+    Regression (v0.2.1): the v0.2 manifest shipped an unquoted colon
+    inside the plain-scalar description ("Prove every run: command
+    ..."), which is invalid YAML. GitHub failed every consumer run
+    at "Set up job" with "Mapping values are not allowed in this
+    context", and the suite never noticed because nothing parsed the
+    manifest. Parse it here, strictly: PyYAML when the test
+    environment has it, plus a stdlib scan for the same defect class
+    so the suite stays zero-dependency everywhere else.
+    """
+
+    def test_action_yml_parses_as_strict_yaml(self):
+        with open(os.path.join(HERE, "action.yml"), encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            import yaml
+        except ImportError:
+            yaml = None
+        if yaml is not None:
+            doc = yaml.safe_load(text)  # raises on the v0.2 defect
+            self.assertIsInstance(doc, dict)
+            self.assertEqual(doc["name"], "CI Command Truth")
+            self.assertIsInstance(doc["description"], str)
+            self.assertEqual(doc["runs"]["using"], "composite")
+        in_block = False
+        block_indent = 0
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip())
+            if in_block:
+                if stripped and indent <= block_indent:
+                    in_block = False
+                else:
+                    continue  # literal block-scalar text, not a scalar
+            if not stripped or stripped.startswith("#"):
+                continue
+            _key, sep, value = stripped.partition(":")
+            if not sep:
+                continue
+            value = value.strip()
+            if value in ("|", ">", "|-", ">-", "|+", ">+"):
+                in_block, block_indent = True, indent
+                continue
+            if not value or value[0] in "\"'[{&*!>@`":
+                continue  # quoted / flow / anchor — not a plain scalar
+            self.assertNotIn(
+                ": ", value,
+                f"action.yml:{lineno}: unquoted ':' inside a plain "
+                "scalar — quote the value or drop the colon")
+            self.assertFalse(
+                value.endswith(":"),
+                f"action.yml:{lineno}: plain scalar ends in ':'")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

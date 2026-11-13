@@ -14,4 +14,4 @@ jobs:
       # Option A: run the script directly (vendored in this repo).
       - name: Prove every run command exists
         run: python3 ci_command_truth.py . --github-annotations
-      # Option B: use the published action: uses: RakTikoo/ci-command-truth@v0.2
+      # Option B: use the published action: uses: RakTikoo/ci-command-truth@v0.2.1
