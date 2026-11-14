@@ -2,6 +2,32 @@
 
 Brief, factual entries for the shipped versions, newest first.
 
+## Unreleased
+
+- **Cargo (`cargo`) target resolution** — workflow `cargo` calls
+  with repo-local targets now resolve against `Cargo.toml`: the
+  manifest is found by walking up from the step's directory (as
+  cargo does; `--manifest-path` honoured) and read line-wise
+  (stdlib only, no TOML parser). `--bin` / `--example` / `--test` /
+  `--bench` names check against the manifest's `[[bin]]` /
+  `[[example]]` / `[[test]]` / `[[bench]]` entries plus cargo's
+  autodiscovery (`src/main.rs`, `src/bin/*`, `examples/*`,
+  `tests/*`, `benches/*`); `-p` / `--package` names must be
+  workspace members (root `[workspace] members`, globs and
+  `exclude` honoured). Subcommands that name crates.io packages or
+  external `cargo-*` binaries (`install`, `add`, `publish`,
+  `watch`, …) stay skipped. New finding kinds:
+  `missing-cargo-manifest`, `missing-cargo-package`,
+  `missing-cargo-bin`, `missing-cargo-example`, `missing-cargo-test`
+  and `missing-cargo-bench` (with did-you-mean suggestions). A
+  `Cargo.toml` that cannot be enumerated line-wise (no readable
+  `[package]` name and no `[workspace]`) is treated as unknown —
+  its checks are skipped, never flagged. The cargo fixture pack
+  (`clean-cargo-single`, `clean-cargo-workspace`,
+  `missing-cargo-bin`) joins the registered corpus, as its
+  `EXPECTED.md` files promised (34 clean / 10 planted-missing);
+  tests 77 → 83, spotcheck 15 → 16 cases.
+
 ## v0.3.0 — 2026-11-14
 
 - **Taskfile (`task`) target resolution** — workflow `task X` calls

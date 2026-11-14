@@ -226,6 +226,24 @@ def _():
     }), ()
 
 
+@case("cargo targets: bin, package, workspace, external subs")
+def _():
+    return build({
+        ".github/workflows/ci.yml": HDR +
+        "      - run: cargo build --release\n"
+        "      - run: cargo test -p alpha\n"
+        "      - run: cargo run --bin alpha\n"
+        "      - run: cargo clippy --workspace -- -D warnings\n"
+        "      - run: cargo install cargo-audit\n"
+        "      - run: cargo fmt --check\n",
+        "Cargo.toml":
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/alpha\"]\n",
+        "crates/alpha/Cargo.toml":
+            "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\n",
+        "crates/alpha/src/main.rs": "fn main() {}\n",
+    }), ()
+
+
 def main():
     failures = 0
     for name, fn in CASES:

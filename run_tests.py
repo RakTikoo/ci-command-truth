@@ -38,7 +38,9 @@ CLEAN = ["clean-npm", "clean-make", "clean-just", "clean-scripts",
          # v0.2: python -m submodule fixtures
          "clean-python-submodule", "clean-python-namespace",
          # v0.3: Taskfile fixture
-         "clean-taskfile"]
+         "clean-taskfile",
+         # cargo resolver: the fixture pack that waited for the code
+         "clean-cargo-single", "clean-cargo-workspace"]
 MISSING = {  # fixture -> expected finding kind
     "missing-npm-script": "missing-npm-script",
     "missing-make-target": "missing-make-target",
@@ -51,6 +53,8 @@ MISSING = {  # fixture -> expected finding kind
     # v0.3: planted missing Taskfile target / missing Taskfile
     "missing-taskfile-target": "missing-task-target",
     "missing-taskfile": "missing-taskfile",
+    # cargo resolver: planted missing binary target
+    "missing-cargo-bin": "missing-cargo-bin",
 }
 
 
@@ -911,6 +915,113 @@ class TaskfileTests(unittest.TestCase):
         self.assertEqual(r["findings"], [])
         self.assertEqual(r["exit"], 0)
         self.assertGreater(sum(r["skipped"].values()), 0)
+
+
+class CargoTests(unittest.TestCase):
+    """Cargo (Rust) target resolution: --bin / -p / --example / ..."""
+
+    HDR = ("name: t\non: push\njobs:\n  t:\n"
+           "    runs-on: ubuntu-latest\n    steps:\n")
+
+    def _repo(self, files):
+        import tempfile
+        d = tempfile.mkdtemp(prefix="cct-cargo-")
+        for rel, content in files.items():
+            p = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as fh:
+                fh.write(content)
+        return d
+
+    SINGLE = {
+        "Cargo.toml":
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n"
+            "[[bin]]\nname = \"app-cli\"\npath = \"src/bin/cli.rs\"\n",
+        "src/main.rs": "fn main() {}\n",
+        "src/bin/tool.rs": "fn main() {}\n",
+        "examples/demo.rs": "fn main() {}\n",
+    }
+
+    def test_model_collects_bins_and_autodiscovery(self):
+        d = self._repo(self.SINGLE)
+        project, _ = cct.RepoModel(d).cargo_project(d)
+        pkg = project["packages"]["app"]
+        # [[bin]] entry + src/main.rs (package name) + src/bin/*.rs
+        self.assertEqual(pkg["bins"], {"app", "app-cli", "tool"})
+        self.assertEqual(pkg["examples"], {"demo"})
+
+    def test_bin_example_and_package_selection_resolve(self):
+        files = dict(self.SINGLE)
+        files[".github/workflows/ci.yml"] = self.HDR + \
+            "      - run: cargo build\n" \
+            "      - run: cargo run --bin tool\n" \
+            "      - run: cargo run --bin=app-cli\n" \
+            "      - run: cargo test -p app\n" \
+            "      - run: cargo build --example demo\n"
+        r = cct.scan(self._repo(files))
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["exit"], 0)
+        self.assertGreater(r["checked"], 0)
+
+    def test_missing_bin_is_one_finding(self):
+        files = dict(self.SINGLE)
+        files[".github/workflows/ci.yml"] = self.HDR + \
+            "      - run: cargo run --bin ghost\n"
+        r = cct.scan(self._repo(files))
+        self.assertEqual(r["exit"], 1)
+        self.assertEqual(len(r["findings"]), 1)
+        self.assertEqual(r["findings"][0]["kind"], "missing-cargo-bin")
+        self.assertIn("ghost", r["findings"][0]["expected"])
+
+    def test_workspace_package_selection(self):
+        files = {
+            "Cargo.toml":
+                "[workspace]\nresolver = \"2\"\n"
+                "members = [\"crates/*\"]\n",
+            "crates/one/Cargo.toml":
+                "[package]\nname = \"one\"\nversion = \"0.1.0\"\n",
+            "crates/one/src/lib.rs": "pub fn one() {}\n",
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: cargo test -p one\n"
+            "      - run: cargo build --workspace\n",
+        }
+        r = cct.scan(self._repo(files))
+        self.assertEqual(r["findings"], [])
+        files[".github/workflows/ci.yml"] = self.HDR + \
+            "      - run: cargo test -p two\n"
+        r = cct.scan(self._repo(files))
+        self.assertEqual(len(r["findings"]), 1)
+        self.assertEqual(r["findings"][0]["kind"],
+                         "missing-cargo-package")
+
+    def test_no_manifest_is_a_finding_and_bad_manifest_is_skipped(self):
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: cargo build\n"})
+        r = cct.scan(d)
+        self.assertEqual(len(r["findings"]), 1)
+        self.assertEqual(r["findings"][0]["kind"],
+                         "missing-cargo-manifest")
+        # A Cargo.toml with neither [package] nor [workspace] cannot
+        # be enumerated line-wise: unknown, skipped, never flagged.
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: cargo build\n",
+            "Cargo.toml": "[dependencies]\nserde = \"1\"\n"})
+        r = cct.scan(d)
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["exit"], 0)
+        self.assertGreater(sum(r["skipped"].values()), 0)
+
+    def test_external_subcommands_are_skipped(self):
+        files = dict(self.SINGLE)
+        files[".github/workflows/ci.yml"] = self.HDR + \
+            "      - run: cargo install ripgrep\n" \
+            "      - run: cargo +nightly build\n" \
+            "      - run: cargo watch -x test\n"
+        r = cct.scan(self._repo(files))
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["exit"], 0)
 
 
 class ActionManifestTests(unittest.TestCase):

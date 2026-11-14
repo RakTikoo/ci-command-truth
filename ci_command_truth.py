@@ -838,7 +838,7 @@ def normalise_tokens(toks):
 
 # --------------------------------------------------------------------------
 # Repo model: package.json scripts, Makefile targets, justfile recipes,
-# Taskfile tasks
+# Taskfile tasks, Cargo projects
 #
 # A resolver file that exists but cannot be read/parsed is reported as
 # "unknown" (checks depending on it are skipped with a reason), except
@@ -853,6 +853,7 @@ class RepoModel:
         self._make_rules = {}
         self._just_cache = {}
         self._task_cache = {}
+        self._cargo_cache = {}
         self._members_cache = {}
         self.warnings = []
 
@@ -1373,6 +1374,271 @@ class RepoModel:
             else:
                 acc["includes"].setdefault(ent["ns"], cand)
 
+    # -- Cargo (Rust) -----------------------------------------------------
+    # Cargo.toml is TOML and there is no TOML parser in the stdlib, so
+    # the manifest is enumerated line-wise (the same pragmatic-subset
+    # approach as the Taskfile reader above): the [package] name, the
+    # [[bin]] / [[example]] / [[test]] / [[bench]] target names, the
+    # [workspace] member list, plus cargo's autodiscovery on disk
+    # (src/main.rs, src/bin/*, examples/*, tests/*, benches/*). A
+    # manifest whose package cannot be enumerated that way — no
+    # [package] and no [workspace], a [package] with no readable name,
+    # an unreadable file — is reported as "unknown" and its checks are
+    # skipped, never flagged.
+    def cargo_project(self, base):
+        """(project|'unknown'|None, manifest_path)
+
+        ``project`` is {"packages": {name: pkg}, "root_package":
+        name|None, "dir": manifest_dir}; pkg is {"name", "dir",
+        "bins", "examples", "tests", "benches"} (name sets). Cargo
+        itself searches parent directories for a manifest, so the
+        search walks up from ``base`` to the repo root.
+        """
+        if base in self._cargo_cache:
+            return self._cargo_cache[base]
+        result = (None, self._path(base, "Cargo.toml"))
+        here = base
+        while True:
+            cand = self._path(here, "Cargo.toml")
+            if os.path.isfile(cand):
+                result = self._load_cargo_project(cand)
+                break
+            if here == self.root:
+                break
+            parent = os.path.dirname(here)
+            if parent == here:
+                break
+            here = parent
+        self._cargo_cache[base] = result
+        return result
+
+    def cargo_project_for(self, manifest_path):
+        key = ("file", manifest_path)
+        if key in self._cargo_cache:
+            return self._cargo_cache[key]
+        if not os.path.isfile(manifest_path):
+            result = (None, manifest_path)
+        else:
+            result = self._load_cargo_project(manifest_path)
+        self._cargo_cache[key] = result
+        return result
+
+    def _load_cargo_project(self, path):
+        parsed = self._parse_cargo_manifest(path)
+        if parsed == "unknown":
+            return ("unknown", path)
+        pkg, workspace = parsed
+        root_dir = os.path.dirname(path)
+        packages = {}
+        root_package = None
+        if pkg is not None:
+            full = self._cargo_package_targets(pkg, root_dir)
+            packages[full["name"]] = full
+            root_package = full["name"]
+        if workspace is not None:
+            members, exclude = workspace
+            for pat in members:
+                if pat.startswith("!"):
+                    continue
+                for cand in sorted(glob.glob(os.path.join(root_dir,
+                                                          pat))):
+                    if not os.path.isdir(cand):
+                        continue
+                    rel = os.path.relpath(cand, root_dir)
+                    if any(fnmatch.fnmatchcase(rel, ex)
+                           for ex in exclude):
+                        continue
+                    mpath = os.path.join(cand, "Cargo.toml")
+                    if not os.path.isfile(mpath):
+                        continue
+                    mp = self._parse_cargo_manifest(mpath)
+                    if mp == "unknown" or mp[0] is None:
+                        continue        # unenumerable member: skip it
+                    full = self._cargo_package_targets(
+                        mp[0], os.path.normpath(cand))
+                    packages[full["name"]] = full
+        if not packages:
+            return ("unknown", path)
+        return ({"packages": packages, "root_package": root_package,
+                 "dir": root_dir}, path)
+
+    def _cargo_package_targets(self, pkg, pkg_dir):
+        """Merge a parsed manifest's explicit targets with cargo's
+        on-disk autodiscovery for one package directory."""
+        bins = set(pkg["bins"])
+        examples = set(pkg["examples"])
+        tests = set(pkg["tests"])
+        benches = set(pkg["benches"])
+        if pkg["autobins"]:
+            if os.path.isfile(os.path.join(pkg_dir, "src", "main.rs")):
+                bins.add(pkg["name"])
+            bins |= _auto_targets(os.path.join(pkg_dir, "src", "bin"))
+        examples |= _auto_targets(os.path.join(pkg_dir, "examples"))
+        tests |= _auto_targets(os.path.join(pkg_dir, "tests"))
+        benches |= _auto_targets(os.path.join(pkg_dir, "benches"))
+        return {"name": pkg["name"], "dir": pkg_dir, "bins": bins,
+                "examples": examples, "tests": tests,
+                "benches": benches}
+
+    def _parse_cargo_manifest(self, path):
+        """(pkg|None, workspace|None) or 'unknown'.
+
+        pkg: {"name", "autobins", "bins", "examples", "tests",
+        "benches"}; workspace: (members list, exclude list).
+        """
+        text, err = read_capped(path)
+        if text is None:
+            self.warnings.append(
+                f"unreadable resolver file: {path} ({err}); "
+                "resolution treated as unknown")
+            return "unknown"
+        section = None            # current [section] / [[section]]
+        pkg = {"name": None, "autobins": True, "bins": set(),
+               "examples": set(), "tests": set(), "benches": set()}
+        saw_package = False
+        workspace = None
+        members, exclude = [], []
+        pending = None            # (list, text) of a multi-line array
+        lines = text.splitlines()
+        i = 0
+        while i < len(lines):
+            raw = lines[i]
+            i += 1
+            s = _toml_strip_comment(raw).strip()
+            if pending is not None:
+                pending[1].append(s)
+                if "]" in s:
+                    vals = _toml_string_array(" ".join(pending[1]))
+                    (members if pending[0] == "members"
+                     else exclude).extend(vals)
+                    pending = None
+                continue
+            if not s:
+                continue
+            if s.startswith("[[") and s.endswith("]]"):
+                section = s[2:-2].strip()
+                continue
+            if s.startswith("[") and s.endswith("]"):
+                section = s[1:-1].strip()
+                if section == "package":
+                    saw_package = True
+                elif section == "workspace" and workspace is None:
+                    workspace = (members, exclude)
+                continue
+            if "=" not in s:
+                continue
+            key, _, val = s.partition("=")
+            key = key.strip().strip("\"'")
+            val = val.strip()
+            if section == "package":
+                if key == "name":
+                    pkg["name"] = _toml_string(val)
+                elif key == "autobins":
+                    pkg["autobins"] = (val != "false")
+            elif section == "bin":
+                if key == "name":
+                    v = _toml_string(val)
+                    if v:
+                        pkg["bins"].add(v)
+            elif section == "example":
+                if key == "name":
+                    v = _toml_string(val)
+                    if v:
+                        pkg["examples"].add(v)
+            elif section == "test":
+                if key == "name":
+                    v = _toml_string(val)
+                    if v:
+                        pkg["tests"].add(v)
+            elif section == "bench":
+                if key == "name":
+                    v = _toml_string(val)
+                    if v:
+                        pkg["benches"].add(v)
+            elif section == "workspace":
+                if key in ("members", "exclude"):
+                    if val.startswith("[") and "]" not in val:
+                        pending = (key, [val])
+                    else:
+                        vals = _toml_string_array(val)
+                        (members if key == "members"
+                         else exclude).extend(vals)
+        if pending is not None:
+            return "unknown"        # unterminated array: cannot trust
+        if saw_package:
+            if not pkg["name"]:
+                return "unknown"    # [package] with no readable name
+            return (pkg, workspace)
+        if workspace is not None:
+            return (None, workspace)
+        return "unknown"            # neither [package] nor [workspace]
+
+
+def _toml_strip_comment(line):
+    """Remove a trailing # comment, honouring basic/literal strings."""
+    out = []
+    quote = None
+    j = 0
+    while j < len(line):
+        ch = line[j]
+        if quote is not None:
+            out.append(ch)
+            if ch == "\\" and quote == '"' and j + 1 < len(line):
+                out.append(line[j + 1])
+                j += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            out.append(ch)
+        elif ch == "#":
+            break
+        else:
+            out.append(ch)
+        j += 1
+    return "".join(out)
+
+
+def _toml_string(val):
+    """Value of a TOML string token, or None if it is not one."""
+    val = val.strip()
+    if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+        body = val[1:-1]
+        return body.replace('\\"', '"').replace("\\\\", "\\")
+    if len(val) >= 2 and val[0] == "'" and val[-1] == "'":
+        return val[1:-1]
+    return None
+
+
+def _toml_string_array(val):
+    """Strings inside a TOML array token like [\"a\", 'b']."""
+    val = val.strip()
+    if val.startswith("["):
+        val = val[1:]
+    if val.endswith("]"):
+        val = val[:-1]
+    out = []
+    for part in val.split(","):
+        v = _toml_string(part)
+        if v:
+            out.append(v)
+    return out
+
+
+def _auto_targets(directory):
+    """Cargo autodiscovery: <dir>/*.rs stems and <dir>/*/main.rs."""
+    names = set()
+    if os.path.isdir(directory):
+        for entry in sorted(os.listdir(directory)):
+            full = os.path.join(directory, entry)
+            if os.path.isfile(full) and entry.endswith(".rs"):
+                names.add(entry[:-3])
+            elif os.path.isdir(full) and os.path.isfile(
+                    os.path.join(full, "main.rs")):
+                names.add(entry)
+    return names
+
 
 def _yaml_key_name(s):
     """Name of the YAML mapping key at the start of s, or None.
@@ -1806,6 +2072,84 @@ class Checker:
                                           depth + 1)
         return ("missing", tf_path, names)
 
+    def check_cargo(self, wf, line, segment, base, sub, packages, bins,
+                    examples, tests, benches, manifest=None):
+        self.checked += 1
+        if not self._within_root(base):
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        if manifest is not None and not self._within_root(manifest):
+            # Same outside-root guard as `--manifest-path` abuse:
+            # never read a manifest outside the repo root.
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        if manifest is not None:
+            project, mpath = self.model.cargo_project_for(manifest)
+        else:
+            project, mpath = self.model.cargo_project(base)
+        if project == "unknown":
+            self.skip("resolver-file-unknown")
+            self.checked -= 1
+            return
+        if project is None:
+            if bins:
+                exp = f"Cargo.toml (for binary '{bins[0]}')"
+            elif packages:
+                exp = f"Cargo.toml (for package '{packages[0]}')"
+            else:
+                exp = f"Cargo.toml (for `cargo {sub}`)"
+            self.finding(wf, line, segment, "missing-cargo-manifest",
+                         exp, [mpath])
+            return
+        universe = project["packages"]
+        scope = None
+        if packages:
+            scope = []
+            for name in packages:
+                if name in universe:
+                    scope.append(universe[name])
+                else:
+                    self.finding(wf, line, segment,
+                                 "missing-cargo-package",
+                                 f"cargo package '{name}'", [mpath],
+                                 suggestion=_suggest(name,
+                                                     universe.keys()))
+            if not scope:
+                scope = list(universe.values())
+        elif project["root_package"]:
+            scope = [universe[project["root_package"]]]
+        else:
+            scope = list(universe.values())
+
+        def pool(kind):
+            out = set()
+            for p in scope:
+                out |= p[kind]
+            return out
+
+        for name in bins:
+            if name not in pool("bins"):
+                self.finding(wf, line, segment, "missing-cargo-bin",
+                             f"cargo binary '{name}'", [mpath],
+                             suggestion=_suggest(name, pool("bins")))
+        for name in examples:
+            if name not in pool("examples"):
+                self.finding(wf, line, segment, "missing-cargo-example",
+                             f"cargo example '{name}'", [mpath],
+                             suggestion=_suggest(name, pool("examples")))
+        for name in tests:
+            if name not in pool("tests"):
+                self.finding(wf, line, segment, "missing-cargo-test",
+                             f"cargo test target '{name}'", [mpath],
+                             suggestion=_suggest(name, pool("tests")))
+        for name in benches:
+            if name not in pool("benches"):
+                self.finding(wf, line, segment, "missing-cargo-bench",
+                             f"cargo bench target '{name}'", [mpath],
+                             suggestion=_suggest(name, pool("benches")))
+
     def check_file(self, wf, line, segment, base, rel, kind="missing-file"):
         self.checked += 1
         if "$" in rel:
@@ -2233,6 +2577,7 @@ class Checker:
             return
         if any("$" in t for t in toks[:2]) and head in (
                 "npm", "pnpm", "yarn", "bun", "make", "just", "task",
+                "cargo",
                 "python", "python3", "bash", "sh", "node", "pip", "pip3"):
             self.skip("variable-argument")
             return
@@ -2252,6 +2597,10 @@ class Checker:
         # task (Taskfile)
         if head == "task":
             self._check_task(wf, line, seg, base, toks)
+            return
+        # cargo (Rust)
+        if head == "cargo":
+            self._check_cargo(wf, line, seg, base, toks)
             return
         # pip file arguments (also `python -m pip ...`)
         if head in ("pip", "pip3") or (head in PY_NAMES and toks[1:3] == ["-m", "pip"]):
@@ -2573,6 +2922,128 @@ class Checker:
             return
         for target in targets:          # `task lint test` runs both
             self.check_task(wf, line, seg, base, target, taskfile)
+
+    # Subcommands that operate on the local project and can name
+    # repo-local targets. Every other cargo subcommand either names
+    # crates.io packages (install/add/publish/...), creates a project
+    # (new/init), or is an external `cargo-<name>` binary — none of
+    # those has a repo-local resolution target.
+    _CARGO_LOCAL_SUBS = {"build", "check", "test", "bench", "run",
+                         "clippy", "doc", "rustc", "rustdoc", "fix"}
+    _CARGO_VALUE_FLAGS = {"--features", "-F", "--target",
+                          "--target-dir", "--profile", "--jobs", "-j",
+                          "--message-format", "--color", "--config",
+                          "-Z", "--out-dir", "--exclude"}
+
+    def _check_cargo(self, wf, line, seg, base, toks):
+        manifest = None
+        sub = None
+        i = 1
+        # Global options come before the subcommand.
+        while i < len(toks):
+            t = toks[i]
+            if t.startswith("+"):
+                # `cargo +nightly ...` is the rustup proxy selecting a
+                # toolchain, not a plain cargo invocation.
+                self.skip("external-tool")
+                return
+            if t in ("--version", "-V", "--help", "-h"):
+                self.skip("external-tool")
+                return
+            if t in ("--manifest-path",) and i + 1 < len(toks):
+                if "$" in toks[i + 1]:
+                    self.skip("variable-argument"); return
+                manifest = os.path.normpath(
+                    os.path.join(base, toks[i + 1]))
+                i += 2
+                continue
+            if t.startswith("--manifest-path="):
+                val = t.split("=", 1)[1]
+                if "$" in val:
+                    self.skip("variable-argument"); return
+                manifest = os.path.normpath(os.path.join(base, val))
+                i += 1
+                continue
+            if t in self._CARGO_VALUE_FLAGS and i + 1 < len(toks):
+                i += 2
+                continue
+            if t.startswith("-"):
+                i += 1
+                continue
+            sub = t
+            i += 1
+            break
+        if sub is None or sub not in self._CARGO_LOCAL_SUBS:
+            self.skip("external-tool")
+            return
+        packages, bins, examples, tests, benches = [], [], [], [], []
+        while i < len(toks):
+            t = toks[i]
+            if t == "--":
+                break               # the rest is the binary's own args
+            dest = None
+            if t in ("-p", "--package"):
+                dest = packages
+            elif t == "--bin":
+                dest = bins
+            elif t == "--example":
+                dest = examples
+            elif t == "--test":
+                dest = tests
+            elif t == "--bench":
+                dest = benches
+            if dest is not None:
+                if i + 1 < len(toks):
+                    if "$" in toks[i + 1]:
+                        self.skip("variable-argument"); return
+                    dest.append(toks[i + 1])
+                    i += 2
+                else:
+                    i += 1
+                continue
+            matched = False
+            for flag, dest in (("--package=", packages),
+                               ("--bin=", bins), ("--example=", examples),
+                               ("--test=", tests), ("--bench=", benches)):
+                if t.startswith(flag):
+                    val = t.split("=", 1)[1]
+                    if "$" in val:
+                        self.skip("variable-argument"); return
+                    dest.append(val)
+                    matched = True
+                    break
+            if matched:
+                i += 1
+                continue
+            if t.startswith("-p") and not t.startswith("--") \
+                    and len(t) > 2:
+                if "$" in t[2:]:
+                    self.skip("variable-argument"); return
+                packages.append(t[2:])
+                i += 1
+                continue
+            if t in ("--manifest-path",) and i + 1 < len(toks):
+                if "$" in toks[i + 1]:
+                    self.skip("variable-argument"); return
+                manifest = os.path.normpath(
+                    os.path.join(base, toks[i + 1]))
+                i += 2
+                continue
+            if t.startswith("--manifest-path="):
+                val = t.split("=", 1)[1]
+                if "$" in val:
+                    self.skip("variable-argument"); return
+                manifest = os.path.normpath(os.path.join(base, val))
+                i += 1
+                continue
+            if t in self._CARGO_VALUE_FLAGS and i + 1 < len(toks):
+                i += 2
+                continue
+            # Any other flag, and any bare token (e.g. the test-name
+            # filter in `cargo test foo`), has no repo-local target.
+            i += 1
+        self.check_cargo(wf, line, seg, base, sub, packages, bins,
+                         examples, tests, benches, manifest)
 
     def _check_interpreter(self, wf, line, seg, base, head, toks):
         args = toks[1:]
@@ -2999,6 +3470,12 @@ _SARIF_KIND_TEXT = {
     "missing-just-recipe": "just recipe referenced by a workflow does not exist",
     "missing-taskfile": "Taskfile referenced by a workflow does not exist",
     "missing-task-target": "Taskfile task referenced by a workflow does not exist",
+    "missing-cargo-manifest": "Cargo.toml manifest referenced by a workflow does not exist",
+    "missing-cargo-package": "cargo package referenced by a workflow is not a workspace member",
+    "missing-cargo-bin": "cargo binary target referenced by a workflow does not exist",
+    "missing-cargo-example": "cargo example target referenced by a workflow does not exist",
+    "missing-cargo-test": "cargo test target referenced by a workflow does not exist",
+    "missing-cargo-bench": "cargo bench target referenced by a workflow does not exist",
     "missing-file": "file referenced by a workflow does not exist",
     "missing-script-file": "script file referenced by a workflow does not exist",
     "missing-requirements-file": "requirements file referenced by a workflow does not exist",
