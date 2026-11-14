@@ -2,8 +2,8 @@
 """CI Command Truth — prove every `run:` command in GitHub workflows exists.
 
 STATIC ONLY: this tool never executes anything from the scanned repository.
-It reads workflow text, package.json, Makefiles, justfiles and checks that
-referenced files exist on disk. Python standard library only.
+It reads workflow text, package.json, Makefiles, justfiles, Taskfiles and
+checks that referenced files exist on disk. Python standard library only.
 
 Guiding principle: when static resolution is genuinely uncertain, the
 segment is SKIPPED with a named reason (and counted as skipped) rather
@@ -17,6 +17,7 @@ silent pass).
 import argparse
 import ast
 import difflib
+import fnmatch
 import glob
 import importlib.machinery
 import json
@@ -836,7 +837,8 @@ def normalise_tokens(toks):
 
 
 # --------------------------------------------------------------------------
-# Repo model: package.json scripts, Makefile targets, justfile recipes
+# Repo model: package.json scripts, Makefile targets, justfile recipes,
+# Taskfile tasks
 #
 # A resolver file that exists but cannot be read/parsed is reported as
 # "unknown" (checks depending on it are skipped with a reason), except
@@ -850,6 +852,7 @@ class RepoModel:
         self._make_cache = {}
         self._make_rules = {}
         self._just_cache = {}
+        self._task_cache = {}
         self._members_cache = {}
         self.warnings = []
 
@@ -1162,6 +1165,260 @@ class RepoModel:
             if nm:
                 acc["recipes"].add(nm.group(1))
 
+    # -- Taskfile ---------------------------------------------------------
+    # Taskfiles are YAML and there is no YAML parser in the stdlib, so
+    # task names are enumerated line-wise from the v3 `tasks:` mapping
+    # (the same pragmatic-subset approach as the pnpm-workspace.yaml
+    # reader above). A Taskfile whose tasks cannot be enumerated that
+    # way — a v2-layout file (tasks at top level), a flow-style or
+    # anchor/merge-key-built mapping, a tab-indented file — is reported
+    # as "unknown" and its checks are skipped, never flagged.
+    TASKFILE_NAMES = ("Taskfile.yml", "Taskfile.yaml", "Taskfile.dist.yml",
+                      "Taskfile.dist.yaml", "taskfile.yml", "taskfile.yaml",
+                      "taskfile.dist.yml", "taskfile.dist.yaml")
+
+    def task_tasks(self, base):
+        """(names:set|'unknown'|None, taskfile_path, includes:dict)
+
+        ``names`` is every name callable from the CLI in this file:
+        task names plus their `aliases:` entries, with `flatten:`
+        includes merged in; tasks marked `internal:` are excluded
+        (Task refuses them from the command line). ``includes`` maps a
+        namespace to the candidate path of the included Taskfile, or
+        None for a remote (http/https) include, which cannot be
+        resolved statically.
+        """
+        if base in self._task_cache:
+            return self._task_cache[base]
+        chosen = None
+        for name in self.TASKFILE_NAMES:
+            cand = self._path(base, name)
+            if os.path.isfile(cand):
+                chosen = cand
+                break
+        if chosen is None:
+            result = (None, self._path(base, "Taskfile.yml"), {})
+        else:
+            result = self._load_taskfile(chosen)
+        self._task_cache[base] = result
+        return result
+
+    def task_tasks_for(self, path):
+        key = ("file", path)
+        if key in self._task_cache:
+            return self._task_cache[key]
+        if not os.path.isfile(path):
+            result = (None, path, {})
+        else:
+            result = self._load_taskfile(path)
+        self._task_cache[key] = result
+        return result
+
+    def _load_taskfile(self, path):
+        acc = {"names": set(), "includes": {}, "unknown": False,
+               "saw_tasks": False}
+        self._parse_taskfile_into(path, set(), acc, 0)
+        if acc["unknown"] and not acc["names"]:
+            return ("unknown", path, acc["includes"])
+        if not acc["saw_tasks"]:
+            return ("unknown", path, acc["includes"])
+        return (acc["names"], path, acc["includes"])
+
+    def _parse_taskfile_into(self, path, visited, acc, depth):
+        if path in visited or depth > 8:
+            return
+        visited.add(path)
+        text, err = read_capped(path)
+        if text is None:
+            acc["unknown"] = True
+            self.warnings.append(
+                f"unreadable resolver file: {path} ({err}); "
+                "resolution treated as unknown")
+            return
+        base_dir = os.path.dirname(path)
+        section = None            # current top-level key
+        entry_indent = None       # indent of entries in this section
+        cur = None                # current task entry being collected
+        alias_indent = None       # indent of an open `aliases:` list
+        cur_inc = None            # current include entry being collected
+        inc_entries = []
+
+        def flush_task():
+            nonlocal cur
+            if cur is not None and not cur["internal"]:
+                acc["names"].add(cur["name"])
+                acc["names"].update(cur["aliases"])
+            cur = None
+
+        for raw in text.splitlines():
+            if "\t" in raw[:len(raw) - len(raw.lstrip())]:
+                # YAML forbids tab indentation; a tab-indented file
+                # cannot be enumerated line-wise with confidence.
+                acc["unknown"] = True
+                return
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#") \
+                    or stripped in ("---", "..."):
+                continue
+            indent = len(raw) - len(raw.lstrip(" "))
+            if indent == 0:
+                flush_task()
+                cur_inc = None
+                alias_indent = None
+                entry_indent = None
+                m = re.match(r"^['\"]?([^'\":]+?)['\"]?\s*:(?:\s+(.*))?$",
+                             stripped)
+                section = m.group(1).strip() if m else None
+                if section == "tasks":
+                    acc["saw_tasks"] = True
+                    val = (m.group(2) or "").strip()
+                    if val.startswith("#"):
+                        val = ""
+                    if val and val != "{}":
+                        # Flow-style tasks mapping on one line: not
+                        # enumerable line-wise.
+                        acc["unknown"] = True
+                continue
+            if section == "tasks":
+                if entry_indent is None:
+                    entry_indent = indent
+                if indent == entry_indent:
+                    flush_task()
+                    alias_indent = None
+                    name = _yaml_key_name(stripped)
+                    if name is not None:
+                        cur = {"name": name, "aliases": [],
+                               "internal": False}
+                    continue
+                if cur is None or indent < entry_indent:
+                    continue
+                if alias_indent is not None and indent <= alias_indent:
+                    alias_indent = None
+                am = re.match(r"^aliases\s*:\s*(.*)$", stripped)
+                if am:
+                    val = am.group(1).strip()
+                    if val.startswith("["):
+                        inner = val[1:val.index("]")] if "]" in val \
+                            else val[1:]
+                        for part in inner.split(","):
+                            part = part.strip().strip("'\"")
+                            if part:
+                                cur["aliases"].append(part)
+                    elif val:
+                        cur["aliases"].append(val.strip("'\""))
+                    else:
+                        alias_indent = indent
+                    continue
+                if alias_indent is not None and indent > alias_indent:
+                    im = re.match(r"^-\s*(.+?)\s*$", stripped)
+                    if im:
+                        cur["aliases"].append(im.group(1).strip("'\""))
+                        continue
+                if re.match(r"^internal\s*:\s*(?i:true)\s*$", stripped):
+                    cur["internal"] = True
+                continue
+            if section == "includes":
+                if entry_indent is None:
+                    entry_indent = indent
+                if indent == entry_indent:
+                    name = _yaml_key_name(stripped)
+                    if name is not None:
+                        cur_inc = {"ns": name,
+                                   "scalar": _yaml_key_value(stripped),
+                                   "props": {}}
+                        inc_entries.append(cur_inc)
+                    else:
+                        cur_inc = None
+                    continue
+                if cur_inc is not None and indent > entry_indent:
+                    pm = re.match(r"^(taskfile|dir|flatten)\s*:\s*(.*)$",
+                                  stripped)
+                    if pm:
+                        cur_inc["props"][pm.group(1)] = \
+                            _yaml_scalar(pm.group(2).strip())
+                    continue
+                continue
+        flush_task()
+        for ent in inc_entries:
+            scalar = ent["scalar"]
+            if scalar.startswith("{"):
+                fm = re.search(r"taskfile\s*:\s*([^,}]+)", scalar)
+                if fm:
+                    ent["props"].setdefault("taskfile",
+                                            fm.group(1).strip())
+                if re.search(r"flatten\s*:\s*true", scalar):
+                    ent["props"].setdefault("flatten", "true")
+            raw_ref = ent["props"].get("taskfile") or scalar \
+                or ent["props"].get("dir")
+            if not raw_ref or raw_ref.startswith("{"):
+                continue
+            raw_ref = raw_ref.strip("'\"")
+            if raw_ref.startswith(("http://", "https://")):
+                acc["includes"].setdefault(ent["ns"], None)
+                continue
+            cand = os.path.normpath(os.path.join(base_dir, raw_ref))
+            if os.path.isdir(cand):
+                found = None
+                for nm in self.TASKFILE_NAMES:
+                    c2 = os.path.join(cand, nm)
+                    if os.path.isfile(c2):
+                        found = c2
+                        break
+                cand = found if found else os.path.join(cand,
+                                                        "Taskfile.yml")
+            if ent["props"].get("flatten") == "true":
+                if os.path.isfile(cand):
+                    self._parse_taskfile_into(cand, visited, acc,
+                                              depth + 1)
+            else:
+                acc["includes"].setdefault(ent["ns"], cand)
+
+
+def _yaml_key_name(s):
+    """Name of the YAML mapping key at the start of s, or None.
+
+    The key colon is the first ':' followed by a space or end of line
+    (YAML's plain-key rule), so a namespaced key like `logs:api:` and
+    a value containing ': ' both parse correctly. Quoted keys are
+    unwrapped.
+    """
+    if s[:1] in ("'", '"'):
+        q = s[0]
+        end = s.find(q, 1)
+        if end > 0 and re.match(r"^\s*:(\s.*)?$", s[end + 1:]):
+            return s[1:end]
+        return None
+    for i, c in enumerate(s):
+        if c == ":" and (i + 1 == len(s) or s[i + 1] in " \t"):
+            name = s[:i].strip()
+            return name or None
+    return None
+
+
+def _yaml_scalar(v):
+    """A plain YAML scalar value: unwrapped quotes, comment stripped."""
+    if not v:
+        return ""
+    if v[:1] in ("'", '"'):
+        end = v.find(v[0], 1)
+        return v[1:end] if end > 0 else v.strip("'\"")
+    return re.sub(r"\s+#.*$", "", v).strip()
+
+
+def _yaml_key_value(s):
+    """The scalar value after the key colon in s ('' when absent)."""
+    if s[:1] in ("'", '"'):
+        end = s.find(s[0], 1)
+        if end == -1:
+            return ""
+        rest = s[end + 1:].lstrip()
+        return _yaml_scalar(rest[1:].strip()) if rest.startswith(":") \
+            else ""
+    for i, c in enumerate(s):
+        if c == ":" and (i + 1 == len(s) or s[i + 1] in " \t"):
+            return _yaml_scalar(s[i + 1:].strip())
+    return ""
+
 
 def _just_top_colon(s):
     """Index of the first ':' at bracket depth 0 outside quotes."""
@@ -1470,6 +1727,84 @@ class Checker:
             self.finding(wf, line, segment, "missing-just-recipe",
                          f"just recipe '{recipe}'", [jf_path],
                          suggestion=_suggest(recipe, recipes))
+
+    def check_task(self, wf, line, segment, base, target, taskfile=None,
+                   bare=False):
+        self.checked += 1
+        if not self._within_root(base):
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        if taskfile is not None and not self._within_root(taskfile):
+            # Same outside-root guard as `just -f`.
+            self.skip("outside-repo-root")
+            self.checked -= 1
+            return
+        if taskfile is not None:
+            names, tf_path, includes = self.model.task_tasks_for(taskfile)
+        else:
+            names, tf_path, includes = self.model.task_tasks(base)
+        if names == "unknown":
+            self.skip("resolver-file-unknown")
+            self.checked -= 1
+            return
+        if names is None:
+            exp = f"Taskfile (for task '{target}')" if target \
+                else "Taskfile (for bare `task`)"
+            self.finding(wf, line, segment, "missing-taskfile", exp,
+                         [tf_path])
+            return
+        if target is None:
+            # A listing invocation only needs the file. Bare `task`
+            # runs the task named `default`.
+            if bare and self._resolve_task(names, includes, tf_path,
+                                           "default")[0] == "missing":
+                self.finding(wf, line, segment, "missing-task-target",
+                             "a 'default' task in Taskfile "
+                             "(bare `task` runs it)", [tf_path])
+            return
+        status, where, pool = self._resolve_task(names, includes,
+                                                 tf_path, target)
+        if status == "unknown":
+            self.skip("resolver-file-unknown")
+            self.checked -= 1
+        elif status == "missing-file":
+            self.finding(wf, line, segment, "missing-taskfile",
+                         f"included Taskfile (for task '{target}')",
+                         [where])
+        elif status == "missing":
+            self.finding(wf, line, segment, "missing-task-target",
+                         f"Taskfile task '{target}'", [where],
+                         suggestion=_suggest(target, pool))
+
+    def _resolve_task(self, names, includes, tf_path, target, depth=0):
+        """Resolve a (possibly namespaced) Taskfile task name.
+
+        Returns (status, path, pool): status is 'ok', 'missing',
+        'missing-file' (an included Taskfile does not exist) or
+        'unknown' (an include cannot be enumerated statically);
+        pool is the name set the lookup failed against, for
+        suggestions.
+        """
+        if target in names:
+            return ("ok", tf_path, names)
+        for n in names:
+            if "*" in n and fnmatch.fnmatchcase(target, n):
+                return ("ok", tf_path, names)
+        if ":" in target and depth < 8:
+            ns, rest = target.split(":", 1)
+            if ns in includes:
+                inc = includes[ns]
+                if inc is None:
+                    return ("unknown", tf_path, names)  # remote include
+                sub, sub_path, sub_inc = self.model.task_tasks_for(inc)
+                if sub == "unknown":
+                    return ("unknown", sub_path, names)
+                if sub is None:
+                    return ("missing-file", inc, names)
+                return self._resolve_task(sub, sub_inc, sub_path, rest,
+                                          depth + 1)
+        return ("missing", tf_path, names)
 
     def check_file(self, wf, line, segment, base, rel, kind="missing-file"):
         self.checked += 1
@@ -1897,8 +2232,8 @@ class Checker:
             self.skip("variable-command")
             return
         if any("$" in t for t in toks[:2]) and head in (
-                "npm", "pnpm", "yarn", "bun", "make", "just", "python",
-                "python3", "bash", "sh", "node", "pip", "pip3"):
+                "npm", "pnpm", "yarn", "bun", "make", "just", "task",
+                "python", "python3", "bash", "sh", "node", "pip", "pip3"):
             self.skip("variable-argument")
             return
 
@@ -1913,6 +2248,10 @@ class Checker:
         # just
         if head == "just":
             self._check_just(wf, line, seg, base, toks)
+            return
+        # task (Taskfile)
+        if head == "task":
+            self._check_task(wf, line, seg, base, toks)
             return
         # pip file arguments (also `python -m pip ...`)
         if head in ("pip", "pip3") or (head in PY_NAMES and toks[1:3] == ["-m", "pip"]):
@@ -2153,6 +2492,87 @@ class Checker:
         if recipe and "$" in recipe:
             self.skip("variable-argument"); return
         self.check_just(wf, line, seg, base, recipe, justfile)
+
+    def _check_task(self, wf, line, seg, base, toks):
+        taskfile, targets, list_mode, i = None, [], False, 1
+        value_flags = {"-t", "--taskfile", "-d", "--dir",
+                       "-C", "--concurrency", "-o", "--output",
+                       "--interval", "--tempdir", "--sort"}
+
+        def use_taskfile(val):
+            nonlocal taskfile
+            if val == "-":
+                return False        # Taskfile read from stdin
+            taskfile = os.path.normpath(os.path.join(base, val))
+            return True
+
+        while i < len(toks):
+            t = toks[i]
+            if t == "--":
+                break                   # the rest is CLI_ARGS, not tasks
+            if t in ("-g", "--global"):
+                # The global Taskfile lives in the user's home
+                # directory, not in this repo.
+                self.skip("outside-repo-root")
+                return
+            if t in ("--list", "-l", "--list-all", "-a", "--help",
+                     "-h", "--version", "--init"):
+                list_mode = True
+                i += 1
+                continue
+            if t in value_flags and i + 1 < len(toks):
+                val = toks[i + 1]
+                if "$" in val:
+                    self.skip("variable-argument"); return
+                if t in ("-t", "--taskfile"):
+                    if not use_taskfile(val):
+                        self.skip("stdin-taskfile"); return
+                elif t in ("-d", "--dir"):
+                    base = os.path.normpath(os.path.join(base, val))
+                i += 2
+                continue
+            if t.startswith("--taskfile=") or t.startswith("--dir="):
+                val = t.split("=", 1)[1]
+                if "$" in val:
+                    self.skip("variable-argument"); return
+                if t.startswith("--taskfile="):
+                    if not use_taskfile(val):
+                        self.skip("stdin-taskfile"); return
+                else:
+                    base = os.path.normpath(os.path.join(base, val))
+                i += 1
+                continue
+            if t.startswith(("-t", "-d")) and len(t) > 2 \
+                    and not t.startswith("--"):
+                val = t[2:]
+                if "$" in val:
+                    self.skip("variable-argument"); return
+                if t.startswith("-t"):
+                    if not use_taskfile(val):
+                        self.skip("stdin-taskfile"); return
+                else:
+                    base = os.path.normpath(os.path.join(base, val))
+                i += 1
+                continue
+            if t.startswith("-"):
+                i += 1
+                continue                # other flags: no static effect
+            if "=" in t:
+                i += 1
+                continue                # VAR=value assignment
+            targets.append(t)
+            i += 1
+        if any("$" in t or "{{" in t for t in targets):
+            self.skip("variable-argument")
+            return
+        if not targets:
+            # `task --list` only needs the file to exist; bare `task`
+            # runs the task named `default`.
+            self.check_task(wf, line, seg, base, None, taskfile,
+                            bare=not list_mode)
+            return
+        for target in targets:          # `task lint test` runs both
+            self.check_task(wf, line, seg, base, target, taskfile)
 
     def _check_interpreter(self, wf, line, seg, base, head, toks):
         args = toks[1:]
@@ -2577,6 +2997,8 @@ _SARIF_KIND_TEXT = {
     "missing-make-target": "make target referenced by a workflow does not exist",
     "missing-justfile": "justfile referenced by a workflow does not exist",
     "missing-just-recipe": "just recipe referenced by a workflow does not exist",
+    "missing-taskfile": "Taskfile referenced by a workflow does not exist",
+    "missing-task-target": "Taskfile task referenced by a workflow does not exist",
     "missing-file": "file referenced by a workflow does not exist",
     "missing-script-file": "script file referenced by a workflow does not exist",
     "missing-requirements-file": "requirements file referenced by a workflow does not exist",
