@@ -1,0 +1,34 @@
+version: '3'
+
+includes:
+  ci:
+    taskfile: ./taskfiles/ci.yml
+    dir: ./taskfiles
+
+tasks:
+  default:
+    desc: List the available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the project
+    aliases: [b]
+    cmds:
+      - echo build
+
+  test:
+    desc: Run the tests
+    cmds:
+      - echo test
+
+  lint:
+    desc: Lint the sources
+    cmds:
+      - echo lint
+
+  setup:
+    desc: Internal helper; Task refuses it from the command line
+    internal: true
+    cmds:
+      - echo setup
