@@ -1,0 +1,12 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the project
+    cmds:
+      - echo build
+
+  test:
+    desc: Run the tests
+    cmds:
+      - echo test
