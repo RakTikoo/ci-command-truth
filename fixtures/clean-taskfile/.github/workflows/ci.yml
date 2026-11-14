@@ -1,0 +1,14 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: task build
+      - run: task b
+      - run: task ci:verify
+      - run: task --list
+      - run: task --silent test
+      - run: task lint test
+      - run: task build MODE=fast
+      - run: task
