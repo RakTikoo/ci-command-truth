@@ -1,0 +1,12 @@
+version: '3'
+
+tasks:
+  verify:
+    desc: Verify the build artefacts
+    cmds:
+      - echo verify
+
+  docs:
+    desc: Build the docs
+    cmds:
+      - echo docs
