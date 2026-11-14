@@ -2,6 +2,8 @@
 
 **Prove every `run:` command in your GitHub workflows actually exists — before CI finds out it doesn't.**
 
+![CI Command Truth terminal demo](ci-command-truth.gif)
+
 A workflow that says `npm run test:unit` when `package.json` has no
 `test:unit` script, `make deploy` when the Makefile has no `deploy`
 target, or `./scripts/release.sh` when that file was renamed fails only
