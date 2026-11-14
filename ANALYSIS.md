@@ -158,14 +158,11 @@ the published checks list, not a source audit or a differential run.)
 
 ## Expansion ladder
 
-1. More ecosystems behind the same interface: `cargo` (workspace
-   bins — **done, unreleased**: `--bin`/`-p`/`--example`/`--test`/
-   `--bench` resolution against `Cargo.toml`, incl. autodiscovery;
-   see the cargo section below), `go run ./cmd/...`, `task`
-   (Taskfile — **done in v0.3.0**: v3 `tasks:` resolution with
-   `includes:` namespaces, aliases and wildcards; see the
-   limitations list), `tox`/`nox` environments, `composer run`,
-   `bundle exec rake` targets, Rakefile.
+1. More ecosystems behind the same interface: `cargo` (workspace bins),
+   `go run ./cmd/...`, `task` (Taskfile — **done, released in v0.3.0**: v3
+   `tasks:` resolution with `includes:` namespaces, aliases and
+   wildcards; see the limitations list), `tox`/`nox` environments,
+   `composer run`, `bundle exec rake` targets, Rakefile.
 2. ~~`python -m` submodule checking when the top-level package is
    repo-local~~ — **done in v0.2** (see below).
 3. Full monorepo resolution beyond identifiable workspace selectors.
@@ -592,20 +589,3 @@ the same change that lands the resolver. The registered corpus is
 unchanged (31 clean / 7 planted-missing / 8 edge / 1 special);
 `run_tests.py` (70 tests) and `spotcheck_fp.py` (14/14) pass with
 the pack in place.
-
-**Resolver landed (2026-11-14, unreleased).** The cargo resolver
-described above now exists: `Cargo.toml` is read line-wise (no TOML
-parser in the stdlib), the manifest search walks up from the step's
-directory as cargo does, `--manifest-path` is honoured, `--bin` /
-`--example` / `--test` / `--bench` names resolve against explicit
-`[[...]]` entries plus on-disk autodiscovery, and `-p` names must
-be workspace members (`members` globs and `exclude` honoured).
-The three fixtures are registered in `run_tests.py` in the same
-change (corpus now 34 clean / 10 planted-missing), each behaving
-exactly as its `EXPECTED.md` records; `run_tests.py` is at 83
-tests and `spotcheck_fp.py` at 16/16, including a fresh-sandbox
-cargo case. Accepted limits: a manifest that cannot be enumerated
-line-wise (no readable `[package]` name, no `[workspace]`) is
-treated as unknown and skipped; unknown subcommands are treated
-as external `cargo-*` binaries and skipped, since cargo itself
-resolves them outside the repo.
