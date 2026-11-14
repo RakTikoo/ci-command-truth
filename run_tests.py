@@ -36,7 +36,9 @@ CLEAN = ["clean-npm", "clean-make", "clean-just", "clean-scripts",
          "clean-python-flags", "clean-env-subst", "clean-cd-advanced",
          "clean-install-python-m", "clean-block-indicator",
          # v0.2: python -m submodule fixtures
-         "clean-python-submodule", "clean-python-namespace"]
+         "clean-python-submodule", "clean-python-namespace",
+         # v0.3: Taskfile fixture
+         "clean-taskfile"]
 MISSING = {  # fixture -> expected finding kind
     "missing-npm-script": "missing-npm-script",
     "missing-make-target": "missing-make-target",
@@ -46,6 +48,9 @@ MISSING = {  # fixture -> expected finding kind
     "missing-requirements": "missing-requirements-file",
     # v0.2: planted missing submodule in a repo-local package
     "missing-python-submodule": "missing-python-module",
+    # v0.3: planted missing Taskfile target / missing Taskfile
+    "missing-taskfile-target": "missing-task-target",
+    "missing-taskfile": "missing-taskfile",
 }
 
 
@@ -786,6 +791,126 @@ class V02Tests(unittest.TestCase):
         self.assertEqual(
             run_tool_mode("missing-npm-script", "--sarif").returncode, 1)
         self.assertEqual(run_tool_mode("edge-empty", "--sarif").returncode, 2)
+
+
+class TaskfileTests(unittest.TestCase):
+    """v0.3: `task` (Taskfile) target resolution."""
+
+    HDR = ("name: t\non: push\njobs:\n  t:\n"
+           "    runs-on: ubuntu-latest\n    steps:\n")
+
+    def _repo(self, files):
+        import tempfile
+        d = tempfile.mkdtemp(prefix="cct-task-")
+        for rel, content in files.items():
+            p = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as fh:
+                fh.write(content)
+        return d
+
+    def test_model_collects_tasks_aliases_and_includes(self):
+        d = self._repo({
+            "Taskfile.yml":
+                "version: '3'\n"
+                "includes:\n"
+                "  ci: ./taskfiles/ci.yml\n"
+                "tasks:\n"
+                "  build:\n"
+                "    aliases:\n"
+                "      - b\n"
+                "    cmds: [echo build]\n"
+                "  helper:\n"
+                "    internal: true\n"
+                "    cmds: [echo helper]\n",
+            "taskfiles/ci.yml":
+                "version: '3'\ntasks:\n  verify:\n    cmds: [echo v]\n",
+        })
+        names, _, includes = cct.RepoModel(d).task_tasks(d)
+        self.assertIn("build", names)
+        self.assertIn("b", names)               # block-style alias
+        self.assertNotIn("helper", names)       # internal: not callable
+        self.assertIn("ci", includes)
+
+    def test_namespaced_and_wildcard_calls_resolve(self):
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: task ci:verify\n"
+            "      - run: task logs:api\n",
+            "Taskfile.yml":
+                "version: '3'\n"
+                "includes:\n"
+                "  ci: ./taskfiles/ci.yml\n"
+                "tasks:\n"
+                "  logs:*:\n"
+                "    cmds: [echo logs]\n",
+            "taskfiles/ci.yml":
+                "version: '3'\ntasks:\n  verify:\n    cmds: [echo v]\n",
+        })
+        r = cct.scan(d)
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["exit"], 0)
+        self.assertGreater(r["checked"], 0)
+
+    def test_missing_namespaced_task_is_one_finding(self):
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: task ci:nosuch\n",
+            "Taskfile.yml":
+                "version: '3'\n"
+                "includes:\n"
+                "  ci: ./taskfiles/ci.yml\n"
+                "tasks:\n"
+                "  build:\n"
+                "    cmds: [echo b]\n",
+            "taskfiles/ci.yml":
+                "version: '3'\ntasks:\n  verify:\n    cmds: [echo v]\n",
+        })
+        r = cct.scan(d)
+        self.assertEqual(r["exit"], 1)
+        self.assertEqual(len(r["findings"]), 1)
+        self.assertEqual(r["findings"][0]["kind"], "missing-task-target")
+        self.assertTrue(
+            r["findings"][0]["looked_in"][0].endswith("ci.yml"))
+
+    def test_bare_task_needs_a_default_task(self):
+        body = ("version: '3'\ntasks:\n  build:\n    cmds: [echo b]\n")
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR + "      - run: task\n",
+            "Taskfile.yml": body})
+        r = cct.scan(d)
+        self.assertEqual(len(r["findings"]), 1)
+        self.assertEqual(r["findings"][0]["kind"], "missing-task-target")
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR + "      - run: task\n",
+            "Taskfile.yml": body +
+            "  default:\n    cmds: [task --list]\n"})
+        r = cct.scan(d)
+        self.assertEqual(r["findings"], [])
+
+    def test_calling_an_internal_task_is_a_finding(self):
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: task helper\n",
+            "Taskfile.yml":
+                "version: '3'\ntasks:\n  helper:\n"
+                "    internal: true\n    cmds: [echo h]\n"})
+        r = cct.scan(d)
+        self.assertEqual(len(r["findings"]), 1)
+        self.assertEqual(r["findings"][0]["kind"], "missing-task-target")
+
+    def test_v2_layout_taskfile_is_skipped_not_flagged(self):
+        # v2 files keep tasks at top level (no `tasks:` mapping), so
+        # the names cannot be enumerated line-wise: unknown, skipped.
+        d = self._repo({
+            ".github/workflows/ci.yml": self.HDR +
+            "      - run: task build\n",
+            "Taskfile.yml":
+                "version: '2'\nbuild:\n  cmds: [echo b]\n"})
+        r = cct.scan(d)
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["exit"], 0)
+        self.assertGreater(sum(r["skipped"].values()), 0)
 
 
 class ActionManifestTests(unittest.TestCase):
