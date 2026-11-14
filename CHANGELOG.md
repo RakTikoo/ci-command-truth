@@ -2,21 +2,7 @@
 
 Brief, factual entries for the shipped versions, newest first.
 
-## v0.2.1 — 2026-11-12
-
-- **Fixed the published action manifest** — the `description:` in
-  `action.yml` contained an unquoted colon ("Prove every run:
-  command ..."), which is invalid YAML, so GitHub could not load
-  the action at all: every consumer run failed at "Set up job".
-  The description is now quoted. Found by the first real
-  cross-repo consumer run; the v0.2 tag is left in place but its
-  manifest is unloadable — pin `@v0.2.1`.
-- **Regression test** — the suite now strictly parses `action.yml`
-  (PyYAML where available, plus a stdlib scan for the same defect
-  class), so an unloadable manifest fails tests instead of
-  consumers. Tests 70 → 71.
-
-## Unreleased
+## v0.3.0 — 2026-11-14
 
 - **Taskfile (`task`) target resolution** — workflow `task X` calls
   now resolve against the tasks defined in `Taskfile.yml` /
@@ -43,6 +29,21 @@ Brief, factual entries for the shipped versions, newest first.
 - Documentation: corrected stale status lines in `ANALYSIS.md`
   (cross-repo staleness audit, 2026-11-11); added this changelog, a
   `CONTRIBUTING.md`, and the README demo above.
+
+
+## v0.2.1 — 2026-11-12
+
+- **Fixed the published action manifest** — the `description:` in
+  `action.yml` contained an unquoted colon ("Prove every run:
+  command ..."), which is invalid YAML, so GitHub could not load
+  the action at all: every consumer run failed at "Set up job".
+  The description is now quoted. Found by the first real
+  cross-repo consumer run; the v0.2 tag is left in place but its
+  manifest is unloadable — pin `@v0.2.1`.
+- **Regression test** — the suite now strictly parses `action.yml`
+  (PyYAML where available, plus a stdlib scan for the same defect
+  class), so an unloadable manifest fails tests instead of
+  consumers. Tests 70 → 71.
 
 ## v0.2 — 2026-11-10
 

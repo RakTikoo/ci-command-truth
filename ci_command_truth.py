@@ -27,7 +27,7 @@ import shlex
 import sys
 import urllib.parse
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 MAX_FILE_BYTES = 1_000_000          # cap for any single file we read
 
