@@ -18,6 +18,22 @@ Brief, factual entries for the shipped versions, newest first.
 
 ## Unreleased
 
+- **Taskfile (`task`) target resolution** — workflow `task X` calls
+  now resolve against the tasks defined in `Taskfile.yml` /
+  `Taskfile.yaml` / `taskfile.yml` (the v3 `tasks:` mapping, read
+  line-wise — stdlib only, no YAML parser), following `includes:`
+  namespaces (`task ci:verify`) and `flatten:` includes. Task
+  `aliases:` names and `*` wildcard task names count; `internal:`
+  tasks do not. Bare `task` requires a `default` task; `task
+  --list` only requires the file. New finding kinds:
+  `missing-taskfile` and `missing-task-target` (with did-you-mean
+  suggestions). A Taskfile whose tasks cannot be enumerated
+  statically (v2 layout, flow-style or anchor-built mappings,
+  remote includes) is treated as unknown — its checks are skipped,
+  never flagged. Fixtures: `clean-taskfile`,
+  `missing-taskfile-target` and `missing-taskfile` join the
+  registered corpus (32 clean / 9 planted-missing); tests 71 → 77,
+  spotcheck 14 → 15 cases.
 - Fixtures: added a cargo fixture pack (`clean-cargo-single`,
   `clean-cargo-workspace`, `missing-cargo-bin`) with documented
   expectations in each fixture's `EXPECTED.md`, ahead of any cargo
