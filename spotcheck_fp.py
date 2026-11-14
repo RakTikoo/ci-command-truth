@@ -205,6 +205,27 @@ def _():
     }), ("created earlier in workflow",)
 
 
+@case("taskfile tasks: alias, namespace, flags, bare default")
+def _():
+    return build({
+        ".github/workflows/ci.yml": HDR +
+        "      - run: task build\n"
+        "      - run: task b\n"
+        "      - run: task ci:verify\n"
+        "      - run: task --silent test\n"
+        "      - run: task --list\n"
+        "      - run: task\n",
+        "Taskfile.yml": "version: '3'\n"
+                        "includes:\n  ci: ./taskfiles/ci.yml\n"
+                        "tasks:\n  default:\n    cmds: [task --list]\n"
+                        "  build:\n    aliases: [b]\n"
+                        "    cmds: [echo build]\n"
+                        "  test:\n    cmds: [echo test]\n",
+        "taskfiles/ci.yml": "version: '3'\n"
+                            "tasks:\n  verify:\n    cmds: [echo v]\n",
+    }), ()
+
+
 def main():
     failures = 0
     for name, fn in CASES:
