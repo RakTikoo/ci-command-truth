@@ -48,6 +48,7 @@ push, a runner, and a log dive.
 | `npm run X --workspace=<path\|name>` / `-w`, `pnpm --filter …`, `yarn workspace <name> …` | the workspace member's `package.json` when the member is identifiable; otherwise the segment is *skipped* with reason `workspace` |
 | `make X`, `make -C dir X`, `make -f file X`, bare `make` | targets in the `Makefile` / `makefile` / `GNUmakefile`, following `include` files; a target matching a pattern/suffix rule, or existing as a file/dir on disk, counts as present |
 | `just X`, `just -f file X`, bare `just` | recipes in `justfile` / `Justfile` / `.justfile`, following `mod` / `import` files; recipes with parameter defaults (`build target='release':`), `@quiet` recipes and `alias` names all count |
+| `task X`, `task ns:X`, `task -t file X`, `task --list`, bare `task` | tasks in `Taskfile.yml` / `Taskfile.yaml` / `taskfile.yml` (and the other names Task itself searches, incl. `*.dist.*` and lowercase variants), following `includes:` namespaces and `flatten:` includes; task `aliases:` names and `*` wildcard task names count, `internal:` tasks do not (Task refuses them from the command line); bare `task` needs a `default` task, `--list` only needs the file |
 | `./scripts/x.sh`, `bash x.sh`, `sh ./x.sh`, `python x.py`, `python3 ./x.py`, `node x.js` | the file existing on disk (per-interpreter flag tables: `bash -e` is a mode flag, only `-c` is inline code; `python -W ignore -m pkg` finds the module) |
 | `python -m pkg.mod` | the full dotted path, **when the top-level package is repo-local** (`pkg/`, `pkg.py`, or under `src/`): every submodule part must resolve (`pkg/mod.py`, `pkg/mod/` regular or namespace package — namespace portions merged across the root and `src/` trees, PEP 420 style — or a compiled module with a genuine platform extension suffix), and a package used as the final target must contain `__main__.py`. Conservative otherwise: repo-local existence is checked first (a local regular package even shadows a stdlib name); stdlib modules (`http.server`, `unittest`, …) and known installed tools (`build`, `pytest`, `coverage`, …) are assumed installed; if the workflow itself installs Python packages (`pip install`, `poetry install`, …), unknown modules are skipped as *assumed installed*; a package whose `__init__.py` really defines/imports `__getattr__` or uses `sys.modules` can invent submodules at runtime, so its submodules are skipped as `dynamic-module` |
 | `pip install -r req.txt` / `-c constraints.txt` | the file existing on disk |
@@ -86,9 +87,12 @@ False positives are the bug this tool refuses to have:
 - segments whose failure is tolerated — joined by `||`, or in a step
   with `continue-on-error: true` — are reported as **warnings**, not
   findings; they never affect the exit code
-- a resolver file (`package.json` / Makefile / justfile) that exists
-  but is too large or unreadable makes its checks *skipped* (reason
-  `resolver-file-unknown`, plus a warning), never treated as empty.
+- a resolver file (`package.json` / Makefile / justfile / Taskfile)
+  that exists but is too large or unreadable makes its checks
+  *skipped* (reason `resolver-file-unknown`, plus a warning), never
+  treated as empty. The same applies to a Taskfile whose tasks
+  cannot be enumerated statically (v2 layout, flow-style or
+  anchor-built `tasks:` mappings).
   A **malformed** `package.json` is stronger: an error state (exit 2),
   listed explicitly like an unscanned file
 
@@ -178,12 +182,12 @@ scripts, or workflow commands (a test asserts the source contains no
 ## Tests
 
 ```console
-$ python3 run_tests.py     # 70 tests, zero dependencies
-$ python3 spotcheck_fp.py  # 14 false-positive headline cases, fresh sandboxes
+$ python3 run_tests.py     # 77 tests, zero dependencies
+$ python3 spotcheck_fp.py  # 15 false-positive headline cases, fresh sandboxes
 ```
 
-Fixture corpus in `fixtures/`: 31 clean repos that must produce zero
-findings, 7 repos with exactly one planted missing reference each, 8
+Fixture corpus in `fixtures/`: 32 clean repos that must produce zero
+findings, 9 repos with exactly one planted missing reference each, 8
 edge-case repos (no-run, uses-only, empty, malformed, CRLF, nested
 workflow subdirectory, empty workflows dir, malformed package.json),
 and 1 downgrade repo (warning-severity findings, exit 0). A further
