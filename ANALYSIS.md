@@ -143,13 +143,25 @@ the published checks list, not a source audit or a differential run.)
   not caught when scanning on Linux (accepted limitation).
 - justfile parsing follows `mod` / `import`, aliases, parameter
   defaults and `@quiet` recipes.
+- Taskfile parsing reads the v3 `tasks:` mapping line-wise (stdlib
+  only, no YAML library): it follows `includes:` namespaces and
+  `flatten:` includes, and counts task `aliases:` and `*` wildcard
+  names; tasks marked `internal:` do not count (Task refuses them
+  from the CLI). It does NOT resolve v2-layout files (tasks at top
+  level), flow-style or anchor/merge-key-built mappings, remote
+  (http/https) includes, tab-indented files, or Task's
+  parent-directory Taskfile search — a Taskfile whose tasks cannot
+  be enumerated is treated as unknown and its checks are skipped
+  (accepted limitation).
 - `npx X` / `bunx X` are not resolved (they may legitimately fetch a
   package that is not in the repo at all).
 
 ## Expansion ladder
 
 1. More ecosystems behind the same interface: `cargo` (workspace bins),
-   `go run ./cmd/...`, `task` (Taskfile), `tox`/`nox` environments,
+   `go run ./cmd/...`, `task` (Taskfile — **done, unreleased**: v3
+   `tasks:` resolution with `includes:` namespaces, aliases and
+   wildcards; see the limitations list), `tox`/`nox` environments,
    `composer run`, `bundle exec rake` targets, Rakefile.
 2. ~~`python -m` submodule checking when the top-level package is
    repo-local~~ — **done in v0.2** (see below).
