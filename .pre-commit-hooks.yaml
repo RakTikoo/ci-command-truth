@@ -1,0 +1,15 @@
+# pre-commit hook for CI Command Truth.
+# Runs the checker over the whole repo whenever a workflow file is
+# among the committed files, so a renamed script or phantom target is
+# caught before the push instead of by CI. The tool is a single
+# stdlib-only module; pre-commit installs it from this repo's
+# pyproject.toml into its own environment.
+- id: ci-command-truth
+  name: CI Command Truth
+  description: "Prove every run: command in .github/workflows exists (npm/pnpm/yarn scripts, make/just/task targets, script files, python -m modules, pip -r files)."
+  entry: ci-command-truth
+  language: python
+  pass_filenames: false
+  args: [.]
+  files: ^\.github/workflows/[^/]+\.ya?ml$
+  types: [file]

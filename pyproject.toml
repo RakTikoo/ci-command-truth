@@ -1,0 +1,32 @@
+# Packaging for CI Command Truth. The tool is a single stdlib-only
+# module (ci_command_truth.py); this file only makes that module
+# pip-installable and adds a `ci-command-truth` console command. The
+# file still runs standalone with `python3 ci_command_truth.py` — no
+# build step, no dependencies.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ci-command-truth"
+version = "0.4.0"
+description = "Prove every run: command in your GitHub workflows actually exists — npm/pnpm/yarn scripts, make/just/task targets, script files, python -m modules. Single file, stdlib only."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["ci", "github-actions", "workflow", "linter", "makefile", "npm"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://github.com/RakTikoo/ci-command-truth"
+Repository = "https://github.com/RakTikoo/ci-command-truth"
+
+[project.scripts]
+ci-command-truth = "ci_command_truth:main"
+
+[tool.setuptools]
+py-modules = ["ci_command_truth"]

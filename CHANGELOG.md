@@ -2,6 +2,22 @@
 
 Brief, factual entries for the shipped versions, newest first.
 
+## Unreleased
+
+- **Packaging**: new `pyproject.toml` —
+  `pip install git+https://github.com/RakTikoo/ci-command-truth` now
+  installs the single-file module plus a `ci-command-truth` console
+  command. The scanner file itself is unchanged and still runs
+  standalone with `python3 ci_command_truth.py`.
+- **Pre-commit**: new `.pre-commit-hooks.yaml` (`ci-command-truth`
+  hook) — the check can run before a workflow file is pushed.
+- **Docs**: README gains "Get it" and "Use as a library" sections
+  (`scan()` / `Checker`); the GitHub Actions section now shows the
+  real `uses: RakTikoo/ci-command-truth@v0.4.0` block instead of the
+  vendored script; the example workflow's Action pin is updated
+  `@v0.2.1` → `@v0.4.0`; the Tests section's counts are corrected
+  (77 → 83 tests, 15 → 16 spotcheck cases, matching v0.4.0).
+
 ## v0.4.0 — 2026-11-14
 
 - **Cargo (`cargo`) target resolution** — workflow `cargo` calls

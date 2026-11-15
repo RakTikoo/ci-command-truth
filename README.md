@@ -98,6 +98,19 @@ False positives are the bug this tool refuses to have:
   A **malformed** `package.json` is stronger: an error state (exit 2),
   listed explicitly like an unscanned file
 
+## Get it
+
+One file, Python standard library only. Install it as a command:
+
+```bash
+pip install git+https://github.com/RakTikoo/ci-command-truth
+ci-command-truth .          # scans the current repo
+```
+
+Or just download `ci_command_truth.py` from this repo and run it
+with `python3` — no install step. In CI, the GitHub Action below
+needs neither.
+
 ## Usage
 
 ```console
@@ -133,16 +146,55 @@ oversized), listed explicitly. Nothing ever passes silently.
 Exit codes: `0` everything checked resolved · `1` something missing ·
 `2` usage/parse error (including any unscanned workflow file).
 
-## Use it in GitHub Actions (3 lines)
+## Use as a library
+
+The module imports cleanly (`import ci_command_truth`), and `scan()`
+runs the whole check and returns the same result dict the CLI renders:
+
+```python
+import ci_command_truth as cct
+
+result = cct.scan("path/to/repo")
+print(result["checked"], "segments checked, exit", result["exit"])
+for f in result["findings"]:
+    print(f["file"], f["line"], f["message"])
+```
+
+On a repo whose workflow calls `npm run test:unit` while
+`package.json` defines only `test:units`, that prints:
+
+```console
+1 segments checked, exit 1
+.github/workflows/ci.yml 8 missing-npm-script: expected script 'test:unit' (looked in: package.json) — did you mean 'test:units'?
+```
+
+`render_text(result)` produces the CLI's text report; the `Checker`
+class is there if you need step-by-step control.
+
+## Use it in GitHub Actions (2 lines)
 
 ```yaml
       - uses: actions/checkout@v4
-      - name: CI Command Truth
-        run: python3 ci_command_truth.py . --github-annotations
+      - uses: RakTikoo/ci-command-truth@v0.4.0
 ```
 
-Or as a (local) action via the bundled `action.yml`; see
-`examples/example-workflow.yml`.
+The Action runs the checker with `--github-annotations` on (its
+default), so findings land as PR annotations; the job fails on any
+finding. Inputs (`path`, `github-annotations`) and a vendored-script
+variant are in `examples/example-workflow.yml`.
+
+## Use it as a pre-commit hook
+
+```yaml
+# .pre-commit-config.yaml
+- repo: https://github.com/RakTikoo/ci-command-truth
+  rev: v0.4.0
+  hooks:
+    - id: ci-command-truth
+```
+
+The hook runs the checker over the repo whenever a workflow file is
+being committed, so a phantom command is caught before the push.
 
 ## NOT in v1
 
@@ -184,8 +236,8 @@ scripts, or workflow commands (a test asserts the source contains no
 ## Tests
 
 ```console
-$ python3 run_tests.py     # 77 tests, zero dependencies
-$ python3 spotcheck_fp.py  # 15 false-positive headline cases, fresh sandboxes
+$ python3 run_tests.py     # 83 tests, zero dependencies
+$ python3 spotcheck_fp.py  # 16 false-positive headline cases, fresh sandboxes
 ```
 
 Fixture corpus in `fixtures/`: 32 clean repos that must produce zero
