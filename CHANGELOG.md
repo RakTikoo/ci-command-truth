@@ -2,7 +2,7 @@
 
 Brief, factual entries for the shipped versions, newest first.
 
-## Unreleased
+## v0.4.0 — 2026-11-14
 
 - **Cargo (`cargo`) target resolution** — workflow `cargo` calls
   with repo-local targets now resolve against `Cargo.toml`: the
