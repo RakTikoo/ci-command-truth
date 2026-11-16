@@ -13,6 +13,8 @@ target, or `./scripts/release.sh` when that file was renamed fails only
 checks those references statically, in milliseconds, with zero
 dependencies.
 
+**First contribution?** Start with a [good first issue](https://github.com/RakTikoo/ci-command-truth/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+
 ## Demo
 
 A two-file demo repo: `package.json` defines the scripts `test` and
