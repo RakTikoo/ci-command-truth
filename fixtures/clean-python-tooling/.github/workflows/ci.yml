@@ -1,0 +1,8 @@
+name: Python tooling
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make test-python
+      - run: python3 scripts/check_types.py
