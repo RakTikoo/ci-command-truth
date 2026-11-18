@@ -589,3 +589,25 @@ the same change that lands the resolver. The registered corpus is
 unchanged (31 clean / 7 planted-missing / 8 edge / 1 special);
 `run_tests.py` (70 tests) and `spotcheck_fp.py` (14/14) pass with
 the pack in place.
+
+## Go fixture pack — corpus first, no resolver yet
+
+Four fixture repos were added under `fixtures/` for Go command
+shapes, with **no tool code changes**:
+
+- `clean-go-single` — `go build ./...`, `go test ./...`,
+  `go vet ./...`, `go run ./cmd/realtool` (the command exists).
+- `clean-go-pinned-tools` — version-pinned `go install ...@vX.Y.Z`
+  of remote tools plus `go build -o`, `go run` and
+  `go test -race -count=1 ./...` against targets that exist.
+- `missing-go-run-package` — `go run ./cmd/ghosttool`, which does
+  not exist.
+- `missing-go-generate-dir` — `go generate ./internal/ghostschema`,
+  a directory that does not exist.
+
+Each documents its expectation in an `EXPECTED.md`. Verified today:
+the tool reports 0 findings / exit 0 on all four, with every `go`
+segment skipped as `external-tool` and `checked` = 0. As with the
+cargo pack, they are not registered in `run_tests.py`; registration
+belongs to the change that adds a Go resolver. The registered corpus
+is unchanged.

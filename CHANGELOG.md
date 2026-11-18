@@ -4,6 +4,11 @@ Brief, factual entries for the shipped versions, newest first.
 
 ## Unreleased
 
+- Fixtures: added a Go fixture pack (`clean-go-single`,
+  `clean-go-pinned-tools`, `missing-go-run-package`,
+  `missing-go-generate-dir`) with documented expectations in each
+  fixture's `EXPECTED.md`, ahead of any Go resolver — corpus first,
+  no tool code changes, not yet registered in `run_tests.py`.
 - **Packaging**: new `pyproject.toml` â€”
   `pip install git+https://github.com/RakTikoo/ci-command-truth` now
   installs the single-file module plus a `ci-command-truth` console

@@ -247,10 +247,11 @@ findings, 9 repos with exactly one planted missing reference each, 8
 edge-case repos (no-run, uses-only, empty, malformed, CRLF, nested
 workflow subdirectory, empty workflows dir, malformed package.json),
 and 1 downgrade repo (warning-severity findings, exit 0). A further
-3 cargo repos (2 clean, 1 planted-missing) sit alongside them with
+3 cargo repos (2 clean, 1 planted-missing) and 4 Go repos (2 clean,
+2 planted-missing) sit alongside them with
 documented expectations in their `EXPECTED.md` files; they join the
-registered corpus when a cargo resolver lands, since cargo segments
-are currently skipped as external tools. See
+registered corpus when a resolver for their tool lands, since cargo and Go
+segments are currently skipped as external tools. See
 ANALYSIS.md for the score, including the v0.2 section.
 
 ## License
