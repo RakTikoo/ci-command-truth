@@ -4,6 +4,11 @@ Brief, factual entries for the shipped versions, newest first.
 
 ## Unreleased
 
+- Fixtures: added a Go fixture pack (`clean-go-single`,
+  `clean-go-pinned-tools`, `missing-go-run-package`,
+  `missing-go-generate-dir`) with documented expectations in each
+  fixture's `EXPECTED.md`, ahead of any Go resolver � corpus first,
+  no tool code changes, not yet registered in `run_tests.py`.
 - **Fixtures**: add clean and planted-missing Python tooling command shapes; registered corpus grows to 35 clean and 11 planted-missing fixtures.
 
 - **Packaging**: new `pyproject.toml` —
