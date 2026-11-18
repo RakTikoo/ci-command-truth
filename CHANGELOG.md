@@ -4,6 +4,8 @@ Brief, factual entries for the shipped versions, newest first.
 
 ## Unreleased
 
+- **Fixtures**: add clean and planted-missing Python tooling command shapes; registered corpus grows to 35 clean and 11 planted-missing fixtures.
+
 - **Packaging**: new `pyproject.toml` —
   `pip install git+https://github.com/RakTikoo/ci-command-truth` now
   installs the single-file module plus a `ci-command-truth` console
