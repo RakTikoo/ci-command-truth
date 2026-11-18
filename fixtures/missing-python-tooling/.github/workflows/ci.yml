@@ -1,0 +1,7 @@
+name: Python tooling
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python3 tests/test_ci.py

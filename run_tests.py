@@ -29,7 +29,7 @@ CLEAN = ["clean-npm", "clean-make", "clean-just", "clean-scripts",
          "clean-working-dir", "clean-wrappers",
          # Fix-pass regression fixtures (adversarial-review findings):
          "clean-pnpm-yarn-bun", "clean-folded", "clean-per-job-defaults",
-         "clean-python-known", "clean-nested-run", "clean-matrix-steps",
+        "clean-python-known", "clean-python-tooling", "clean-nested-run", "clean-matrix-steps",
          "clean-just-advanced", "clean-make-advanced", "clean-heredoc",
          "clean-trailing-comment", "clean-if-false", "clean-workspaces",
          "clean-backslash", "clean-created", "clean-shell-skip",
@@ -47,6 +47,7 @@ MISSING = {  # fixture -> expected finding kind
     "missing-just-recipe": "missing-just-recipe",
     "missing-script-file": "missing-script-file",
     "missing-python-module": "missing-python-module",
+    "missing-python-tooling": "missing-script-file",
     "missing-requirements": "missing-requirements-file",
     # v0.2: planted missing submodule in a repo-local package
     "missing-python-submodule": "missing-python-module",

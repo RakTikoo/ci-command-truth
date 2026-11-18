@@ -1,25 +1,25 @@
 # CI Command Truth — Analysis
 
-Date: 2026-11-10. Status: pushed — github.com/RakTikoo/ci-command-truth, v0.2 tagged at commit 1d9cbaa, CI green (run #115, 70 tests). (Corrected 2026-11-11: the original status line said "local build only (not pushed)", which went stale after the approved push; the H-1B gate still applies to promotion/monetisation.)
+Date: 2026-11-17. This issue #5 fixture-only update is on branch `test/5-python-tooling-fixtures`; scanner behavior is unchanged.
 
 ## Fixture corpus score
 
-Corpus first, tool second. 44 fixture repositories under `fixtures/`
-(after the fix pass below):
+Corpus first, tool second. 55 fixture repositories under `fixtures/`:
 
 | Group | Count | Expectation | Result |
 |---|---|---|---|
-| Clean (`clean-*`) | 29 | 0 findings, exit 0 | **29/29 pass** |
-| Planted missing (`missing-*`) | 6 | exactly 1 finding, correct kind, exit 1 | **6/6 found, 0 extra findings** |
+| Clean (`clean-*`) | 35 | 0 findings, exit 0 | **35/35 pass** |
+| Planted missing (`missing-*`) | 11 | exactly 1 finding, correct kind, exit 1 | **11/11 found, 0 extra findings** |
 | Edge (`edge-*`) | 8 | see below | **8/8 pass** |
 | Special (`special-downgrade`) | 1 | warning-severity findings only, exit 0 | **pass** |
 
-(Pre-fix-pass corpus was 21 fixtures: 9 clean / 6 missing / 6 edge.)
+(Before this Python tooling pack, the registered corpus contained 53 fixtures: 34 clean / 10 missing / 8 edge / 1 special.)
 
 Planted misses, one per fixture: missing npm script, missing make
 target, missing just recipe, missing `./script` file, missing Python
 module (`python -m absentpkg.mod`), missing requirements file
-(`pip install -r requirements-missing.txt`).
+(`pip install -r requirements-missing.txt`), and missing repository-local
+Python script (`python3 tests/test_ci.py`).
 
 Edge cases: workflow with no run steps (exit 0, 0 checked), uses:-only
 workflow (exit 0), empty workflow file (**listed as unscanned, exit 2 —
@@ -35,13 +35,14 @@ Clean fixtures cover: npm/pnpm/yarn forms, make (incl. `-C` and bare
 `&&`/`||`/`;`/`|` chains, env-var prefixes, `sudo`, `${{ }}`
 expressions, `$VAR` script names, multi-line `|` and `>` blocks,
 step `working-directory:`, and runner wrappers (`uv run make test`,
-`poetry run npm run test`).
+`poetry run npm run test`), and a Makefile target wrapping pytest with
+a direct repository-local Python script invoked by a workflow.
 
-**Tests: `python3 run_tests.py` — 33 tests, all passing** (corpus
+**Tests: `python3 run_tests.py` — 83 tests, all passing on Python 3.13** (corpus
 subprocess tests, edge tests, parser/tokeniser unit tests, annotation
 format, fix-pass regression units, and a static-safety test asserting
 the tool source contains no `subprocess`/`eval`/`exec`/`os.system`).
-Plus `python3 spotcheck_fp.py` — 10 fresh-sandbox false-positive
+Plus `python3 spotcheck_fp.py` — 16 fresh-sandbox false-positive
 headline cases, all passing (see Adversarial review).
 
 ### Bugs the corpus caught during the build

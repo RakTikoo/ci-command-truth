@@ -242,8 +242,8 @@ $ python3 run_tests.py     # 83 tests, zero dependencies
 $ python3 spotcheck_fp.py  # 16 false-positive headline cases, fresh sandboxes
 ```
 
-Fixture corpus in `fixtures/`: 32 clean repos that must produce zero
-findings, 9 repos with exactly one planted missing reference each, 8
+Fixture corpus in `fixtures/`: 35 clean repos must produce zero
+findings, 11 repos exactly one planted missing reference each, 8
 edge-case repos (no-run, uses-only, empty, malformed, CRLF, nested
 workflow subdirectory, empty workflows dir, malformed package.json),
 and 1 downgrade repo (warning-severity findings, exit 0). A further
@@ -254,6 +254,10 @@ registered corpus when a resolver for their tool lands, since cargo and Go
 segments are currently skipped as external tools. See
 ANALYSIS.md for the score, including the v0.2 section.
 
+Python
+tooling fixtures cover a Makefile target wrapping pytest, a
+repository-local script invoked from CI, and a missing script path.
+See `ANALYSIS.md` for the fixture score and coverage details.
 ## License
 
 MIT — see `LICENSE`.
