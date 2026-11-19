@@ -113,6 +113,13 @@ pip install git+https://github.com/RakTikoo/ci-command-truth
 ci-command-truth .          # scans the current repo
 ```
 
+The same command via pipx or uv:
+
+```bash
+pipx install git+https://github.com/RakTikoo/ci-command-truth
+uv tool install git+https://github.com/RakTikoo/ci-command-truth
+```
+
 Or just download `ci_command_truth.py` from this repo and run it
 with `python3` — no install step. In CI, the GitHub Action below
 needs neither.
