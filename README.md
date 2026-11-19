@@ -1,5 +1,7 @@
 # CI Command Truth — prove every run: command in your GitHub workflows exists
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RakTikoo/ci-command-truth)
+
 [![Tests](https://github.com/RakTikoo/ci-command-truth/actions/workflows/tests.yml/badge.svg)](https://github.com/RakTikoo/ci-command-truth/actions/workflows/tests.yml)
 
 **Prove every `run:` command in your GitHub workflows actually exists — before CI finds out it doesn't.**
@@ -123,6 +125,8 @@ uv tool install git+https://github.com/RakTikoo/ci-command-truth
 Or just download `ci_command_truth.py` from this repo and run it
 with `python3` — no install step. In CI, the GitHub Action below
 needs neither.
+
+**For agent users:** this repository ships a `SKILL.md` for AI agents. Install it with `npx skills add RakTikoo/ci-command-truth`.
 
 ## Usage
 
