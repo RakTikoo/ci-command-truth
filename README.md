@@ -198,6 +198,15 @@ variant are in `examples/example-workflow.yml`.
 The hook runs the checker over the repo whenever a workflow file is
 being committed, so a phantom command is caught before the push.
 
+## Use with an AI agent
+
+This repo ships a [SKILL.md](SKILL.md) written to the Agent Skills open
+standard. If your coding agent supports skills, point it at this repo and
+it can install CI Command Truth, run it on your workflows, and read the
+verdicts for you when you ask it to check your CI. The skill works as
+promised when the repo is cloned under its real name
+(`ci-command-truth`) — the standard ties the skill's name to its folder.
+
 ## NOT in v1
 
 - No `uses:` action validation (that's actionlint's job — and it does
