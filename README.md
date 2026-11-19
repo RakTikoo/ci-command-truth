@@ -115,6 +115,13 @@ pip install git+https://github.com/RakTikoo/ci-command-truth
 ci-command-truth .          # scans the current repo
 ```
 
+Or install the wheel straight from this repo's release assets (no package
+registry involved):
+
+```sh
+pip install https://github.com/RakTikoo/ci-command-truth/releases/download/v0.4.1/ci_command_truth-0.4.1-py3-none-any.whl
+```
+
 The same command via pipx or uv:
 
 ```bash
@@ -192,7 +199,7 @@ class is there if you need step-by-step control.
 
 ```yaml
       - uses: actions/checkout@v4
-      - uses: RakTikoo/ci-command-truth@v0.4.0
+      - uses: RakTikoo/ci-command-truth@v0.4.1
 ```
 
 The Action runs the checker with `--github-annotations` on (its

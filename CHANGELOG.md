@@ -2,7 +2,12 @@
 
 Brief, factual entries for the shipped versions, newest first.
 
-## Unreleased
+## v0.4.1 — 2026-11-19
+
+- **GitHub Marketplace:** the Action's `action.yml` description is
+  shortened to fit the Marketplace 125-character limit, so the
+  Action can be listed on the GitHub Marketplace. No checker
+  behaviour changes.
 
 - Fixtures: added a Go fixture pack (`clean-go-single`,
   `clean-go-pinned-tools`, `missing-go-run-package`,

@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ci-command-truth"
-version = "0.4.0"
+version = "0.4.1"
 description = "Prove every run: command in your GitHub workflows actually exists — npm/pnpm/yarn scripts, make/just/task targets, script files, python -m modules. Single file, stdlib only."
 readme = "README.md"
 requires-python = ">=3.9"

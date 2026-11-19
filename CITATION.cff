@@ -3,8 +3,8 @@ message: "If you use this software, please cite it as below."
 authors:
   - name: RakTikoo
 title: "ci-command-truth: prove every run: command in your GitHub workflows exists"
-version: 0.4.0
-date-released: 2026-11-14
+version: 0.4.1
+date-released: 2026-11-19
 license: MIT
 url: "https://github.com/RakTikoo/ci-command-truth"
 repository-code: "https://github.com/RakTikoo/ci-command-truth"
