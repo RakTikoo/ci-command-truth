@@ -1,6 +1,6 @@
 ---
 name: ci-command-truth
-description: Check a GitHub repository's Actions workflows for run: commands that do not exist — an npm, pnpm, yarn or bun script missing from package.json, a make, just or task target that is not defined, a script file that is not on disk, or a repo-local python -m module that does not resolve. Use when asked to check, lint or audit GitHub workflows or CI before pushing, when a CI job failed with a missing script, target or file error, or when reviewing changes to .github/workflows files.
+description: Check a GitHub repository's Actions workflows for run: commands that do not exist — an npm, pnpm, yarn or bun script missing from package.json, a make, just or task target that is not defined, a script file that is not on disk, or a repo-local python -m module that does not resolve. Use when asked to check, lint or audit GitHub workflows or CI before pushing, when a CI job failed with a missing script, target or file error, or when reviewing changes to .github/workflows files. Not for scanning AI-agent skills (use skillscan), for checking package dependencies in a pull request (use phantomdep-pr-gate), or for running the workflows themselves.
 license: MIT
 compatibility: Requires Python 3.9+ and pip. Installing needs network access to GitHub; the tool itself runs fully offline and has no dependencies.
 ---

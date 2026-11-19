@@ -1,4 +1,4 @@
-# CI Command Truth
+# CI Command Truth — prove every run: command in your GitHub workflows exists
 
 [![Tests](https://github.com/RakTikoo/ci-command-truth/actions/workflows/tests.yml/badge.svg)](https://github.com/RakTikoo/ci-command-truth/actions/workflows/tests.yml)
 
@@ -12,6 +12,10 @@ target, or `./scripts/release.sh` when that file was renamed fails only
 *after* you push, wait for a runner, and read the log. CI Command Truth
 checks those references statically, in milliseconds, with zero
 dependencies.
+
+**Install in one step:** `pip install git+https://github.com/RakTikoo/ci-command-truth`,
+then run `ci-command-truth .` in the repo to check. Full options are
+under [Get it](#get-it).
 
 **First contribution?** Start with a [good first issue](https://github.com/RakTikoo/ci-command-truth/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 
